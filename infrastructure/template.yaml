@@ -1,0 +1,214 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: HeatFlood Guardian — SAM infrastructure
+
+Globals:
+  Function:
+    Runtime: nodejs20.x
+    Timeout: 15
+    MemorySize: 256
+    Environment:
+      Variables:
+        INCIDENTS_TABLE: !Ref IncidentsTable
+        HOTSPOTS_TABLE: !Ref HotspotsTable
+        SERVICE_VERSION: '0.1.0'
+        SAGEMAKER_ENABLED: 'false'
+        SAGEMAKER_ENDPOINT_NAME: ''
+        MAPBOX_TOKEN: !Sub '{{resolve:ssm:/heatflood/mapbox-token}}'
+    Tracing: Active
+
+Resources:
+
+  # -----------------------------------------------------------------------
+  # API Gateway HTTP API
+  # -----------------------------------------------------------------------
+  HeatFloodApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: prod
+      CorsConfiguration:
+        AllowOrigins:
+          - '*'
+        AllowMethods:
+          - GET
+          - POST
+          - PATCH
+          - OPTIONS
+        AllowHeaders:
+          - Content-Type
+          - Authorization
+
+  # -----------------------------------------------------------------------
+  # Lambda functions
+  # -----------------------------------------------------------------------
+  HealthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/health.handler
+      CodeUri: ../lambda
+      Events:
+        HealthGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HeatFloodApi
+            Path: /health
+            Method: GET
+
+  AnalyseRoutesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/analyseRoutes.handler
+      CodeUri: ../lambda
+      Timeout: 20
+      Events:
+        AnalysePost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HeatFloodApi
+            Path: /routes/analyse
+            Method: POST
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref IncidentsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref HotspotsTable
+
+  GetStatusFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/getStatus.handler
+      CodeUri: ../lambda
+      Events:
+        StatusGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HeatFloodApi
+            Path: /status
+            Method: GET
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref IncidentsTable
+
+  CreateIncidentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/createIncident.handler
+      CodeUri: ../lambda
+      Events:
+        IncidentPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HeatFloodApi
+            Path: /incidents
+            Method: POST
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref IncidentsTable
+
+  ListIncidentsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/listIncidents.handler
+      CodeUri: ../lambda
+      Events:
+        IncidentsGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HeatFloodApi
+            Path: /incidents
+            Method: GET
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref IncidentsTable
+
+  GetDemoScenarioFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/getDemoScenario.handler
+      CodeUri: ../lambda
+      Events:
+        DemoGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HeatFloodApi
+            Path: /demo/scenarios/{id}
+            Method: GET
+
+  # -----------------------------------------------------------------------
+  # DynamoDB tables
+  # -----------------------------------------------------------------------
+  IncidentsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: heatflood-incidents
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: incidentId
+          AttributeType: S
+        - AttributeName: geohash
+          AttributeType: S
+        - AttributeName: createdAt
+          AttributeType: S
+      KeySchema:
+        - AttributeName: incidentId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: geohash-createdAt-index
+          KeySchema:
+            - AttributeName: geohash
+              KeyType: HASH
+            - AttributeName: createdAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: ttlEpoch
+        Enabled: true
+
+  HotspotsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: heatflood-hotspots
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: hotspotId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: hotspotId
+          KeyType: HASH
+
+  AuditTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: heatflood-audit
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: auditId
+          AttributeType: S
+        - AttributeName: entityId
+          AttributeType: S
+        - AttributeName: createdAt
+          AttributeType: S
+      KeySchema:
+        - AttributeName: auditId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: entityId-createdAt-index
+          KeySchema:
+            - AttributeName: entityId
+              KeyType: HASH
+            - AttributeName: createdAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+Outputs:
+  ApiUrl:
+    Description: HTTP API base URL
+    Value: !Sub 'https://${HeatFloodApi}.execute-api.${AWS::Region}.amazonaws.com/prod'
+  IncidentsTableName:
+    Value: !Ref IncidentsTable
+  HotspotsTableName:
+    Value: !Ref HotspotsTable
+  AuditTableName:
+    Value: !Ref AuditTable

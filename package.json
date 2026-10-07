@@ -1,0 +1,25 @@
+{
+  "name": "heatflood-guardian",
+  "version": "0.1.0",
+  "private": true,
+  "description": "HeatFlood Guardian — monorepo root",
+  "workspaces": [
+    "packages/*",
+    "apps/*",
+    "lambda"
+  ],
+  "scripts": {
+    "dev": "cd apps/web && npm run dev",
+    "build": "npm run build --workspaces",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint . --ext .ts,.tsx",
+    "deploy:backend": "cd infrastructure && sam build && sam deploy"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "vitest": "^1.6.0",
+    "eslint": "^8.57.0"
+  }
+}
