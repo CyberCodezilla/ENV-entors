@@ -1,0 +1,38 @@
+{
+  "_source": "Curated historical flood-prone zones for Andheri West / Versova pilot area",
+  "_sourceDate": "2025-01-01",
+  "_usage": "Static prior only. Does not prove current flooding.",
+  "_license": "TODO: confirm source license before demo",
+  "hotspots": [
+    {
+      "hotspotId": "hs-versova-subway",
+      "name": "Versova subway / underpass",
+      "lat": 19.1190,
+      "lon": 72.8170,
+      "radiusM": 250,
+      "type": "flood_prone",
+      "notes": "Low-lying underpass, historically waterlogged during heavy rain",
+      "source": "MCGM ward records (indicative)"
+    },
+    {
+      "hotspotId": "hs-andheri-station",
+      "name": "Andheri station east approach",
+      "lat": 19.1197,
+      "lon": 72.8477,
+      "radiusM": 200,
+      "type": "flood_prone",
+      "notes": "Road surface drainage issues during monsoon",
+      "source": "MCGM ward records (indicative)"
+    },
+    {
+      "hotspotId": "hs-four-bungalows",
+      "name": "Four Bungalows junction",
+      "lat": 19.1230,
+      "lon": 72.8390,
+      "radiusM": 180,
+      "type": "flood_prone",
+      "notes": "Junction prone to waterlogging during >15mm/h rain",
+      "source": "MCGM ward records (indicative)"
+    }
+  ]
+}

@@ -1,0 +1,59 @@
+{
+  "_label": "HISTORICAL / DEMO SCENARIO — NOT LIVE DATA",
+  "_description": "Flood-dominant scenario. Heavy rain (18 mm/h). Two verified waterlogging reports blocking Route A. Route B available.",
+  "_expectedOutcome": {
+    "hasConfidentRecommendation": true,
+    "route1": { "overallFloodLevel": "blocked", "isHardBlocked": true, "blockReason": "Moderator-verified active waterlogging" },
+    "route2": { "overallFloodLevel": "moderate", "isHardBlocked": false },
+    "recommendedRouteId": "route-b"
+  },
+  "request": {
+    "origin": { "lat": 19.105, "lon": 72.826 },
+    "destination": { "lat": 19.135, "lon": 72.848 },
+    "mode": "walking",
+    "departureTime": "2026-07-18T09:00:00+05:30",
+    "heatSensitive": false,
+    "isReplay": true,
+    "scenarioId": "flood"
+  },
+  "injectedWeather": {
+    "apparentTemperatureC": 29.2,
+    "relativeHumidityPct": 96,
+    "precipitationMm": 18.4,
+    "forecastHour": "2026-07-18T09:00:00Z"
+  },
+  "injectedIncidents": [
+    {
+      "incidentId": "demo-inc-001",
+      "latitude": 19.118,
+      "longitude": 72.835,
+      "type": "waterlogging",
+      "depthCategory": "knee",
+      "status": "verified",
+      "sourceType": "community_report",
+      "observedAt": "2026-07-18T08:45:00Z",
+      "isDemo": true
+    },
+    {
+      "incidentId": "demo-inc-002",
+      "latitude": 19.120,
+      "longitude": 72.837,
+      "type": "waterlogging",
+      "depthCategory": "knee",
+      "status": "verified",
+      "sourceType": "community_report",
+      "observedAt": "2026-07-18T08:50:00Z",
+      "isDemo": true
+    }
+  ],
+  "injectedHotspots": [
+    {
+      "hotspotId": "hs-001",
+      "lat": 19.118,
+      "lon": 72.835,
+      "type": "flood_prone",
+      "source": "IMD / MCGM historical data",
+      "sourceDate": "2025-01-01"
+    }
+  ]
+}

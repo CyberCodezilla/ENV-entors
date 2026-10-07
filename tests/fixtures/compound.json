@@ -1,0 +1,58 @@
+{
+  "_label": "HISTORICAL / DEMO SCENARIO — NOT LIVE DATA",
+  "_description": "Compound risk scenario. Extreme heat AND heavy rain. Verified closures on ALL candidate routes.",
+  "_expectedOutcome": {
+    "hasConfidentRecommendation": false,
+    "noConfidentRouteReason": "All available routes intersect active hazard evidence. Delay travel or check official guidance.",
+    "allRoutesHardBlocked": true
+  },
+  "request": {
+    "origin": { "lat": 19.108, "lon": 72.829 },
+    "destination": { "lat": 19.140, "lon": 72.860 },
+    "mode": "walking",
+    "departureTime": "2026-07-20T11:00:00+05:30",
+    "heatSensitive": true,
+    "isReplay": true,
+    "scenarioId": "compound"
+  },
+  "injectedWeather": {
+    "apparentTemperatureC": 41.0,
+    "relativeHumidityPct": 94,
+    "precipitationMm": 32.0,
+    "forecastHour": "2026-07-20T11:00:00Z"
+  },
+  "injectedIncidents": [
+    {
+      "incidentId": "demo-inc-003",
+      "latitude": 19.122,
+      "longitude": 72.840,
+      "type": "road_blocked",
+      "depthCategory": "vehicle_impassable",
+      "status": "verified",
+      "sourceType": "official_closure",
+      "observedAt": "2026-07-20T10:30:00Z",
+      "isDemo": true
+    },
+    {
+      "incidentId": "demo-inc-004",
+      "latitude": 19.130,
+      "longitude": 72.850,
+      "type": "electrical_hazard",
+      "depthCategory": "unknown",
+      "status": "verified",
+      "sourceType": "official_closure",
+      "observedAt": "2026-07-20T10:45:00Z",
+      "isDemo": true
+    }
+  ],
+  "injectedHotspots": [
+    {
+      "hotspotId": "hs-002",
+      "lat": 19.125,
+      "lon": 72.844,
+      "type": "flood_prone",
+      "source": "IMD / MCGM historical data",
+      "sourceDate": "2025-01-01"
+    }
+  ]
+}
