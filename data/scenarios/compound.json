@@ -1,0 +1,55 @@
+{
+  "scenarioId": "compound",
+  "_description": "Compound disaster: post-rain 38°C heat + residual waterlogging. All routes either flooded or dangerously hot. hasConfidentRecommendation=false scenario.",
+  "_expectedOutcome": {
+    "hasConfidentRecommendation": false,
+    "noConfidentRouteReasonContains": "flooded"
+  },
+  "origin": { "lat": 19.1120, "lon": 72.8320 },
+  "destination": { "lat": 19.1380, "lon": 72.8550 },
+  "mode": "walking",
+  "departureTime": "2026-07-18T06:30:00Z",
+  "heatSensitive": true,
+  "isReplay": true,
+  "_weatherOverride": {
+    "apparentTemperatureC": 38.5,
+    "relativeHumidityPct": 92,
+    "precipitationMm": 2.1,
+    "forecastHourUtc": "2026-07-18T06:00:00Z"
+  },
+  "_incidentOverrides": [
+    {
+      "incidentId": "demo-compound-1",
+      "latitude": 19.1180,
+      "longitude": 72.8370,
+      "type": "underpass_flooded",
+      "depthCategory": "vehicle_impassable",
+      "status": "verified",
+      "sourceType": "official_closure",
+      "observedAt": "2026-07-18T06:00:00Z",
+      "isDemo": true
+    },
+    {
+      "incidentId": "demo-compound-2",
+      "latitude": 19.1250,
+      "longitude": 72.8430,
+      "type": "road_blocked",
+      "depthCategory": "vehicle_impassable",
+      "status": "verified",
+      "sourceType": "official_closure",
+      "observedAt": "2026-07-18T06:05:00Z",
+      "isDemo": true
+    },
+    {
+      "incidentId": "demo-compound-3",
+      "latitude": 19.1300,
+      "longitude": 72.8480,
+      "type": "road_blocked",
+      "depthCategory": "knee",
+      "status": "corroborated",
+      "sourceType": "community_report",
+      "observedAt": "2026-07-18T06:10:00Z",
+      "isDemo": true
+    }
+  ]
+}

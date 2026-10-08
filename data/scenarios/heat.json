@@ -1,0 +1,22 @@
+{
+  "scenarioId": "heat",
+  "_description": "Peak summer heat scenario: 42°C feels-like, 85% humidity, 13:30 IST. Tests heat-sensitive route preference.",
+  "_expectedOutcome": {
+    "hasConfidentRecommendation": true,
+    "prefersShadedRoute": true,
+    "heatLevelShouldBe": "high"
+  },
+  "origin": { "lat": 19.1120, "lon": 72.8320 },
+  "destination": { "lat": 19.1380, "lon": 72.8550 },
+  "mode": "walking",
+  "departureTime": "2026-07-18T08:00:00Z",
+  "heatSensitive": true,
+  "isReplay": true,
+  "_weatherOverride": {
+    "apparentTemperatureC": 42.1,
+    "relativeHumidityPct": 85,
+    "precipitationMm": 0,
+    "forecastHourUtc": "2026-07-18T08:00:00Z"
+  },
+  "_incidentOverrides": []
+}

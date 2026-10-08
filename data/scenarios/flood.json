@@ -1,0 +1,56 @@
+{
+  "scenarioId": "flood",
+  "_description": "Heavy monsoon flooding: 28mm/hr rain, 3 verified waterlogging reports near Versova underpass. Andheri underpass hard-blocked.",
+  "_expectedOutcome": {
+    "hasConfidentRecommendation": true,
+    "blockedRouteCount": 1,
+    "recommendedRouteShouldAvoid": "underpass"
+  },
+  "origin": { "lat": 19.1120, "lon": 72.8320 },
+  "destination": { "lat": 19.1380, "lon": 72.8550 },
+  "mode": "walking",
+  "departureTime": "2026-07-18T04:30:00Z",
+  "heatSensitive": false,
+  "isReplay": true,
+  "_weatherOverride": {
+    "apparentTemperatureC": 27.3,
+    "relativeHumidityPct": 98,
+    "precipitationMm": 28.4,
+    "forecastHourUtc": "2026-07-18T04:00:00Z"
+  },
+  "_incidentOverrides": [
+    {
+      "incidentId": "demo-flood-1",
+      "latitude": 19.1180,
+      "longitude": 72.8370,
+      "type": "underpass_flooded",
+      "depthCategory": "vehicle_impassable",
+      "status": "verified",
+      "sourceType": "official_closure",
+      "observedAt": "2026-07-18T04:15:00Z",
+      "isDemo": true
+    },
+    {
+      "incidentId": "demo-flood-2",
+      "latitude": 19.1195,
+      "longitude": 72.8390,
+      "type": "waterlogging",
+      "depthCategory": "knee",
+      "status": "corroborated",
+      "sourceType": "community_report",
+      "observedAt": "2026-07-18T04:20:00Z",
+      "isDemo": true
+    },
+    {
+      "incidentId": "demo-flood-3",
+      "latitude": 19.1205,
+      "longitude": 72.8385,
+      "type": "road_blocked",
+      "depthCategory": "knee",
+      "status": "corroborated",
+      "sourceType": "community_report",
+      "observedAt": "2026-07-18T04:25:00Z",
+      "isDemo": true
+    }
+  ]
+}
