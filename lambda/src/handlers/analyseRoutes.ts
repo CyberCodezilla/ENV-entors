@@ -1,16 +1,12 @@
 /**
- * POST /routes/analyse — Day 2 REAL implementation
+ * POST /routes/analyse — Day 4: adds replay mode injection
  *
- * Pipeline:
- *   1. Validate request (Zod)
- *   2. Fetch routes from Mapbox (up to 3 alternatives)
- *   3. Fetch weather from Open-Meteo for route midpoint
- *   4. Fetch incidents + hotspots from DynamoDB
- *   5. Split each route into ~200 m segments
- *   6. Score every segment (flood + heat + confidence + ML stub)
- *   7. Rank routes and build response
- *
- * Replay mode: injects fixture data instead of calling external APIs.
+ * When isReplay=true the handler:
+ *   - Skips Open-Meteo call → uses _weatherOverride from body
+ *   - Skips DynamoDB incidents → uses _incidentOverrides from body
+ *   - Still calls Mapbox for real route geometry
+ *   - Still calls DynamoDB for hotspots (static reference data)
+ *   - Adds DEMO_SCENARIO banner info to response
  */
 import { APIGatewayProxyHandlerV2 } from 'aws-lambda';
 import { ZodError } from 'zod';
@@ -22,10 +18,12 @@ import {
   SEGMENT_PARAMS,
   PILOT_BBOX,
   isInsidePilotZone,
+  ROUTE_DISCLAIMER,
 } from '@heatflood/shared';
-import { fetchMapboxRoutes } from '../adapters/mapbox';
-import { fetchWeather } from '../adapters/openMeteo';
+import { fetchMapboxRoutes, MapboxRoute } from '../adapters/mapbox';
+import { fetchWeather, WeatherSnapshot } from '../adapters/openMeteo';
 import { fetchNearbyIncidents, fetchAllHotspots } from '../adapters/dynamodb';
+import { getHotspots } from '../utils/hotspotCache';
 import { scoreSegment } from '../engine/segmentScorer';
 import { rankRoutes, RawRoute } from '../engine/routeRanker';
 import { logger } from '../utils/logger';
@@ -33,43 +31,40 @@ import type { ActiveIncident, FloodHotspot } from '../engine/floodRisk';
 
 const MAPBOX_TOKEN = process.env.MAPBOX_TOKEN ?? '';
 
+function buildReplayWeather(override: Record<string, unknown>): WeatherSnapshot {
+  return {
+    apparentTemperatureC: (override.apparentTemperatureC as number) ?? null,
+    relativeHumidityPct: (override.relativeHumidityPct as number) ?? null,
+    precipitationMm: (override.precipitationMm as number) ?? null,
+    forecastHourUtc: (override.forecastHourUtc as string) ?? null,
+    fetchedAt: new Date().toISOString(),
+    isStale: false,
+    staleThresholdMinutes: 30,
+    ageMinutes: 0,
+    error: null,
+  };
+}
+
 export const handler: APIGatewayProxyHandlerV2 = async (event) => {
   const requestId = event.requestContext.requestId;
   const now = new Date();
 
   try {
-    // ---- 1. Validate input ----
     const body = JSON.parse(event.body ?? '{}');
     const request = AnalyseRoutesRequestSchema.parse(body);
 
-    logger.info('analyseRoutes start', {
-      requestId,
-      mode: request.mode,
-      isReplay: request.isReplay,
-      scenarioId: request.scenarioId,
-    });
+    const isReplay = request.isReplay === true;
+    const scenarioId = request.scenarioId ?? null;
 
-    const originInsidePilot = isInsidePilotZone(request.origin.lat, request.origin.lon, PILOT_BBOX);
-    const destInsidePilot = isInsidePilotZone(request.destination.lat, request.destination.lon, PILOT_BBOX);
-    if (!originInsidePilot && !destInsidePilot) {
-      logger.warn('Both endpoints outside pilot zone', { requestId });
-      // Allow but note in response — do not block
-    }
+    logger.info('analyseRoutes start', { requestId, isReplay, scenarioId, mode: request.mode });
 
     const departureTime = new Date(request.departureTime);
     const midLat = (request.origin.lat + request.destination.lat) / 2;
     const midLon = (request.origin.lon + request.destination.lon) / 2;
 
-    // ---- 2. Fetch routes (parallel with weather) ----
-    const [mapboxResult, weather, incidents, hotspots] = await Promise.all([
-      fetchMapboxRoutes(request, MAPBOX_TOKEN),
-      fetchWeather(midLat, midLon, departureTime),
-      fetchNearbyIncidents(midLat, midLon),
-      fetchAllHotspots(),
-    ]);
-
+    // ---- Fetch routes (always real Mapbox) ----
+    const mapboxResult = await fetchMapboxRoutes(request, MAPBOX_TOKEN);
     if (mapboxResult.error || mapboxResult.routes.length === 0) {
-      logger.warn('Mapbox returned no routes', { requestId, error: mapboxResult.error });
       return {
         statusCode: 503,
         headers: { 'Content-Type': 'application/json', 'X-Request-Id': requestId },
@@ -81,7 +76,27 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
       };
     }
 
-    // ---- 3. Score each route ----
+    // ---- Replay vs Live data injection ----
+    let weather: WeatherSnapshot;
+    let incidents: ActiveIncident[];
+    let hotspots: FloodHotspot[];
+
+    if (isReplay && body._weatherOverride) {
+      // Inject fixture data
+      weather = buildReplayWeather(body._weatherOverride as Record<string, unknown>);
+      incidents = (body._incidentOverrides ?? []) as ActiveIncident[];
+      hotspots = await getHotspots(); // hotspots are static — real data always
+      logger.info('analyseRoutes: replay mode active', { scenarioId });
+    } else {
+      // Live data
+      [weather, incidents, hotspots] = await Promise.all([
+        fetchWeather(midLat, midLon, departureTime),
+        fetchNearbyIncidents(midLat, midLon),
+        getHotspots(),
+      ]);
+    }
+
+    // ---- Score each route ----
     const rawRoutes: RawRoute[] = await Promise.all(
       mapboxResult.routes.map(async (route) => {
         const coords = route.geometry.coordinates;
@@ -92,25 +107,21 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
           segs.map(async (seg, idx) => {
             const [sLon, sLat] = seg.startCoord;
             const [eLon, eLat] = seg.endCoord;
-
             const segMidLat = (sLat + eLat) / 2;
             const segMidLon = (sLon + eLon) / 2;
 
-            // Estimate arrival at this segment
-            const segWalkSec = (seg.lengthM / 1.2); // 1.2 m/s avg
             const arrivalUtc = new Date(departureTime.getTime() + cumulativeSec * 1000);
-            cumulativeSec += segWalkSec;
+            cumulativeSec += seg.lengthM / 1.2;
 
-            // Filter incidents within match radius of this segment
-            const nearbyIncidents: ActiveIncident[] = incidents.filter(inc => {
-              const d = haversineDistanceM(segMidLat, segMidLon, inc.latitude, inc.longitude);
-              return d <= SEGMENT_PARAMS.hazardMatchRadiusM;
-            });
+            const nearbyIncidents = incidents.filter(inc =>
+              haversineDistanceM(segMidLat, segMidLon, inc.latitude, inc.longitude)
+              <= SEGMENT_PARAMS.hazardMatchRadiusM
+            );
 
-            const nearbyHotspots: FloodHotspot[] = hotspots.filter(hs => {
-              const d = haversineDistanceM(segMidLat, segMidLon, hs.lat, hs.lon);
-              return d <= SEGMENT_PARAMS.hotspotMatchRadiusM;
-            });
+            const nearbyHotspots = hotspots.filter(hs =>
+              haversineDistanceM(segMidLat, segMidLon, hs.lat, hs.lon)
+              <= SEGMENT_PARAMS.hotspotMatchRadiusM
+            );
 
             return scoreSegment({
               segmentIndex: idx,
@@ -142,19 +153,19 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
       }),
     );
 
-    // ---- 4. Rank routes ----
     const { routes, hasConfidentRecommendation, noConfidentRouteReason } = rankRoutes(rawRoutes);
 
-    // ---- 5. Build response ----
-    const oldestIncident = incidents.length > 0
-      ? Math.max(...incidents.map(i => (now.getTime() - new Date(i.observedAt).getTime()) / 60_000))
+    const oldestIncidentAge = incidents.length > 0
+      ? Math.max(...incidents.map(i =>
+          (now.getTime() - new Date(i.observedAt).getTime()) / 60_000
+        ))
       : null;
 
     const response: AnalyseRoutesResponse = {
       requestId,
       processedAt: now.toISOString(),
-      isReplay: request.isReplay ?? false,
-      scenarioId: request.scenarioId ?? null,
+      isReplay,
+      scenarioId,
 
       routes,
       hasConfidentRecommendation,
@@ -172,8 +183,8 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
 
       dataFreshness: {
         weatherAgeMinutes: weather.ageMinutes,
-        oldestIncidentAgeMinutes: oldestIncident !== null ? Math.round(oldestIncident) : null,
-        hotspotsLoadedAt: hotspots.length > 0 ? now.toISOString() : null,
+        oldestIncidentAgeMinutes: oldestIncidentAge !== null ? Math.round(oldestIncidentAge) : null,
+        hotspotsLoadedAt: now.toISOString(),
       },
 
       mlAvailable: false,
@@ -181,18 +192,13 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     };
 
     logger.info('analyseRoutes complete', {
-      requestId,
-      routeCount: routes.length,
-      hasConfidentRecommendation,
-      mlAvailable: false,
+      requestId, routeCount: routes.length,
+      hasConfidentRecommendation, isReplay, scenarioId,
     });
 
     return {
       statusCode: 200,
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Request-Id': requestId,
-      },
+      headers: { 'Content-Type': 'application/json', 'X-Request-Id': requestId },
       body: JSON.stringify(response),
     };
 
