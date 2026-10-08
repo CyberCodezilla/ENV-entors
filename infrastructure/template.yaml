@@ -26,7 +26,7 @@ Parameters:
     Description: Mapbox Secret Token for Directions API
   AllowedOrigins:
     Type: CommaDelimitedList
-    Default: 'https://heatflood.dev, http://localhost:3000'
+    Default: '*'
     Description: Allowed origins for API Gateway CORS configuration
 
 Resources:
@@ -155,8 +155,8 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub 'heatflood-analyseRoutes-${Stage}'
-      Handler: dist/analyseRoutes.handler
-      CodeUri: ../lambda
+      Handler: analyseRoutes.handler
+      CodeUri: ../lambda/dist
       Environment:
         Variables:
           MAPBOX_TOKEN: '{{resolve:ssm:/heatflood/mapbox-token}}'
@@ -174,15 +174,13 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /routes/analyse
             Method: POST
-            Auth:
-              Authorizer: NONE
 
   GetStatusFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub 'heatflood-getStatus-${Stage}'
-      Handler: dist/getStatus.handler
-      CodeUri: ../lambda
+      Handler: getStatus.handler
+      CodeUri: ../lambda/dist
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref IncidentsTable
@@ -195,15 +193,13 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /status
             Method: GET
-            Auth:
-              Authorizer: NONE
 
   CreateIncidentFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub 'heatflood-createIncident-${Stage}'
-      Handler: dist/createIncident.handler
-      CodeUri: ../lambda
+      Handler: createIncident.handler
+      CodeUri: ../lambda/dist
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref IncidentsTable
@@ -223,8 +219,8 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub 'heatflood-listIncidents-${Stage}'
-      Handler: dist/listIncidents.handler
-      CodeUri: ../lambda
+      Handler: listIncidents.handler
+      CodeUri: ../lambda/dist
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref IncidentsTable
@@ -235,15 +231,13 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /incidents
             Method: GET
-            Auth:
-              Authorizer: NONE
 
   HealthFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub 'heatflood-health-${Stage}'
-      Handler: dist/health.handler
-      CodeUri: ../lambda
+      Handler: health.handler
+      CodeUri: ../lambda/dist
       Events:
         Api:
           Type: HttpApi
@@ -251,15 +245,13 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /health
             Method: GET
-            Auth:
-              Authorizer: NONE
 
   GetDemoScenarioFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub 'heatflood-getDemoScenario-${Stage}'
-      Handler: dist/getDemoScenario.handler
-      CodeUri: ../lambda
+      Handler: getDemoScenario.handler
+      CodeUri: ../lambda/dist
       Events:
         Api:
           Type: HttpApi
@@ -267,8 +259,6 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /demo/scenarios/{id}
             Method: GET
-            Auth:
-              Authorizer: NONE
 
   # ------------------------------------------------------------------ #
   # API Gateway
