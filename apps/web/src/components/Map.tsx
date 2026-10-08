@@ -56,11 +56,11 @@ interface Props {
 }
 
 const INCIDENT_ICONS: Record<string, string> = {
-  waterlogging: '\uD83D\uDCA7',
-  road_blocked: '\uD83D\uDEA7',
-  underpass_flooded: '\uD83C\uDF0A',
-  extreme_heat: '\uD83D\uDD25',
-  other: '\u26A0\uFE0F',
+  waterlogging: '💧',
+  road_blocked: '🚧',
+  underpass_flooded: '🌊',
+  extreme_heat: '🔥',
+  other: '⚠️',
 };
 
 export function Map({ routes, selectedRouteId, incidents, onBboxChange, onRequestReport }: Props) {
@@ -295,7 +295,7 @@ export function Map({ routes, selectedRouteId, incidents, onBboxChange, onReques
       <div ref={containerRef} className="w-full h-full" />
       {!ready && (
         <div className="absolute inset-0 flex items-center justify-center bg-gray-900 text-gray-500 text-sm">
-          Loading map\u2026
+          Loading map…
         </div>
       )}
       <MapLegend />

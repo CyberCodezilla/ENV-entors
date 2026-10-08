@@ -17,11 +17,11 @@ interface Props {
 }
 
 const INCIDENT_TYPES = [
-  { value: 'waterlogging',      label: '\uD83D\uDCA7 Waterlogging' },
-  { value: 'road_blocked',      label: '\uD83D\uDEA7 Road blocked by water' },
-  { value: 'underpass_flooded', label: '\uD83C\uDF0A Underpass flooded' },
-  { value: 'extreme_heat',      label: '\uD83D\uDD25 Extreme heat / no shade' },
-  { value: 'other',             label: '\u26A0\uFE0F Other hazard' },
+  { value: 'waterlogging',      label: '💧 Waterlogging' },
+  { value: 'road_blocked',      label: '🚧 Road blocked by water' },
+  { value: 'underpass_flooded', label: '🌊 Underpass flooded' },
+  { value: 'extreme_heat',      label: '🔥 Extreme heat / no shade' },
+  { value: 'other',             label: '⚠️ Other hazard' },
 ] as const;
 
 const DEPTH_CATEGORIES = [
@@ -66,7 +66,7 @@ export function ReportIncidentModal({ lat, lon, onClose, onSuccess }: Props) {
       <div className="w-full sm:max-w-sm bg-gray-900 rounded-t-2xl sm:rounded-2xl p-5 border border-gray-700 shadow-2xl">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-base font-semibold">Report Hazard</h2>
-          <button onClick={onClose} className="text-gray-500 hover:text-white text-lg leading-none">\u00d7</button>
+          <button onClick={onClose} className="text-gray-500 hover:text-white text-lg leading-none">×</button>
         </div>
 
         <p className="text-xs text-gray-500 mb-4">
@@ -120,7 +120,7 @@ export function ReportIncidentModal({ lat, lon, onClose, onSuccess }: Props) {
               type="submit" disabled={submitting}
               className="flex-1 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm font-semibold transition"
             >
-              {submitting ? 'Submitting\u2026' : 'Submit Report'}
+              {submitting ? 'Submitting…' : 'Submit Report'}
             </button>
           </div>
         </form>

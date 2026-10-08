@@ -13,8 +13,8 @@ const ROUTE_LEGEND = [
 ];
 
 const INCIDENT_LEGEND = [
-  { bg: '#ef4444', icon: '\uD83D\uDCA7', label: 'Verified incident' },
-  { bg: '#f59e0b', icon: '\u26A0\uFE0F', label: 'Unverified report' },
+  { bg: '#ef4444', icon: '💧', label: 'Verified incident' },
+  { bg: '#f59e0b', icon: '⚠️', label: 'Unverified report' },
 ];
 
 export function MapLegend() {
