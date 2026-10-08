@@ -65,13 +65,25 @@ cd apps/web && npm run dev
 # Open http://localhost:3000
 ```
 
-## Step 7: Deploy frontend (Vercel)
+## Step 7: Deploy frontend (AWS S3 Static Web Hosting)
 
+1. Ensure static export is enabled in `apps/web/next.config.mjs` (`output: 'export'`).
+2. Build the static export:
 ```bash
-npx vercel --prod
-# Set env vars in Vercel dashboard:
-#   NEXT_PUBLIC_API_BASE_URL
-#   NEXT_PUBLIC_MAPBOX_TOKEN
+cd apps/web
+npm run build
+```
+3. Create and configure an S3 bucket for web hosting:
+```bash
+export BUCKET_NAME=heatflood-frontend-YOUR_ACCOUNT_ID
+aws s3 mb s3://$BUCKET_NAME --region ap-south-1
+aws s3api delete-public-access-block --bucket $BUCKET_NAME --region ap-south-1
+aws s3 website s3://$BUCKET_NAME --index-document index.html --error-document 404.html --region ap-south-1
+# Don't forget to apply a public read bucket policy to allow s3:GetObject
+```
+4. Sync the build output:
+```bash
+aws s3 sync out s3://$BUCKET_NAME --delete --region ap-south-1
 ```
 
 ## Step 8: Smoke test

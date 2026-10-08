@@ -19,6 +19,15 @@ Output: ranked routes with a per-segment risk breakdown, a map overlay, and 3 pr
 
 ---
 
+## Live Demo / Deployed URLs
+
+The project is **100% hosted natively on AWS** (ap-south-1).
+
+*   **Frontend (AWS S3 Website)**: [http://heatflood-frontend-663972508924.s3-website.ap-south-1.amazonaws.com](http://heatflood-frontend-663972508924.s3-website.ap-south-1.amazonaws.com)
+*   **Backend API (AWS API Gateway)**: [https://jpiub1heok.execute-api.ap-south-1.amazonaws.com/prod](https://jpiub1heok.execute-api.ap-south-1.amazonaws.com/prod)
+
+---
+
 ## Architecture
 
 ```
@@ -214,7 +223,7 @@ Returns `{ status: "ok", timestamp, version }`.
 | Routing | Mapbox Directions API |
 | Language | TypeScript (strict) throughout |
 | Testing | Vitest |
-| Deployment | SAM CLI + Vercel (frontend) |
+| Deployment | AWS SAM CLI + AWS S3 Static Web Hosting (frontend) |
 
 ---
 
