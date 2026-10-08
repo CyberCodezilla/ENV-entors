@@ -15,11 +15,12 @@
  *     type / sourceType guard is the real filter and lives in the reduce.
  */
 import { APIGatewayProxyHandlerV2 } from 'aws-lambda';
-import { DynamoDBClient, ScanCommand } from '@aws-sdk/client-dynamodb';
+import { ScanCommand, ScanCommandInput } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
+import { dynamoClient } from '../adapters/dynamodb';
 import { logger } from '../utils/logger';
 
-const client = new DynamoDBClient({ region: process.env.AWS_REGION ?? 'ap-south-1' });
+const client = dynamoClient;
 const INCIDENTS_TABLE = process.env.INCIDENTS_TABLE ?? 'heatflood-incidents';
 
 export const handler: APIGatewayProxyHandlerV2 = async (event) => {
@@ -29,28 +30,53 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
   let lngMin = -180, latMin = -90, lngMax = 180, latMax = 90;
   if (bboxParam) {
     const parts = bboxParam.split(',').map(Number);
-    if (parts.length === 4 && parts.every(n => !isNaN(n))) {
+    if (parts.length === 4 && parts.every(n => Number.isFinite(n))) {
       [lngMin, latMin, lngMax, latMax] = parts;
+      if (latMin > latMax || lngMin > lngMax || latMin < -90 || latMax > 90 || lngMin < -180 || lngMax > 180) {
+        return {
+          statusCode: 400,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ error: 'INVALID_BBOX', detail: 'bbox coordinates out of valid range' }),
+        };
+      }
+    } else {
+      return {
+        statusCode: 400,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ error: 'INVALID_BBOX', detail: 'bbox must be 4 comma-separated numbers: lng_min,lat_min,lng_max,lat_max' }),
+      };
     }
   }
 
   logger.info('listIncidents called', { bbox: bboxParam });
 
   try {
-    const result = await client.send(new ScanCommand({
-      TableName: INCIDENTS_TABLE,
-      FilterExpression: 'expiresAt > :now AND #s <> :rejected AND #s <> :internal',
-      ExpressionAttributeNames: { '#s': 'status' },
-      ExpressionAttributeValues: {
-        ':now':      { S: now },
-        ':rejected': { S: 'rejected' },
-        ':internal': { S: '_internal' },
-      },
-    }));
+    const rawItems: Record<string, import('@aws-sdk/client-dynamodb').AttributeValue>[] = [];
+    let lastEvaluatedKey: Record<string, import('@aws-sdk/client-dynamodb').AttributeValue> | undefined = undefined;
+
+    do {
+      const scanParams: ScanCommandInput = {
+        TableName: INCIDENTS_TABLE,
+        FilterExpression: 'expiresAt > :now AND #s <> :rejected AND #s <> :internal',
+        ExpressionAttributeNames: { '#s': 'status' },
+        ExpressionAttributeValues: {
+          ':now':      { S: now },
+          ':rejected': { S: 'rejected' },
+          ':internal': { S: '_internal' },
+        },
+        ExclusiveStartKey: lastEvaluatedKey,
+      };
+      const scanOutput = await client.send(new ScanCommand(scanParams));
+
+      if (scanOutput.Items?.length) {
+        rawItems.push(...scanOutput.Items);
+      }
+      lastEvaluatedKey = scanOutput.LastEvaluatedKey;
+    } while (lastEvaluatedKey);
 
     // Single O(n) pass: unmarshall + type-guard + bbox-filter + field-strip
     const incidents: Record<string, unknown>[] = [];
-    for (const raw of result.Items ?? []) {
+    for (const raw of rawItems) {
       const item = unmarshall(raw);
 
       // Skip internal rate-limit sentinel records
@@ -79,6 +105,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     logger.error('listIncidents error', { err });
     return {
       statusCode: 500,
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ error: 'INTERNAL_ERROR' }),
     };
   }

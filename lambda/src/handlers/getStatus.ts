@@ -18,41 +18,54 @@ import { getHotspots } from '../utils/hotspotCache';
 import { logger } from '../utils/logger';
 
 export const handler: APIGatewayProxyHandlerV2 = async (event) => {
-  const lat = parseFloat(event.queryStringParameters?.lat ?? '');
-  const lon = parseFloat(event.queryStringParameters?.lon ?? '');
+  try {
+    const lat = parseFloat(event.queryStringParameters?.lat ?? '');
+    const lon = parseFloat(event.queryStringParameters?.lon ?? '');
 
-  if (isNaN(lat) || isNaN(lon)) {
-    return { statusCode: 400, body: JSON.stringify({ error: 'MISSING_COORDINATES' }) };
+    if (!Number.isFinite(lat) || !Number.isFinite(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+      return {
+        statusCode: 400,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ error: 'INVALID_COORDINATES', detail: 'lat must be [-90, 90] and lon must be [-180, 180]' }),
+      };
+    }
+
+    const inside = isInsidePilotZone(lat, lon, PILOT_BBOX);
+    logger.info('getStatus called', { lat: lat.toFixed(4), lon: lon.toFixed(4), inside });
+
+    const [weather, incidents, hotspots] = await Promise.all([
+      fetchWeather(lat, lon, new Date()),
+      fetchNearbyIncidents(lat, lon),
+      getHotspots(), // uses 15-min in-memory cache
+    ]);
+
+    const response: AreaStatusResponse = {
+      lat,
+      lon,
+      fetchedAt: new Date().toISOString(),
+      weather: {
+        apparentTemperatureC: weather.apparentTemperatureC,
+        relativeHumidityPct: weather.relativeHumidityPct,
+        precipitationMm: weather.precipitationMm,
+        forecastHour: weather.forecastHourUtc,
+        isStale: weather.isStale,
+      },
+      activeIncidentCount: incidents.length,
+      hotspotCount: hotspots.length,
+      pilotZoneStatus: inside ? 'inside' : 'outside',
+    };
+
+    return {
+      statusCode: 200,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(response),
+    };
+  } catch (err) {
+    logger.error('getStatus failed', { err });
+    return {
+      statusCode: 500,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ error: 'INTERNAL_ERROR' }),
+    };
   }
-
-  const inside = isInsidePilotZone(lat, lon, PILOT_BBOX);
-  logger.info('getStatus called', { lat: lat.toFixed(4), lon: lon.toFixed(4), inside });
-
-  const [weather, incidents, hotspots] = await Promise.all([
-    fetchWeather(lat, lon, new Date()),
-    fetchNearbyIncidents(lat, lon),
-    getHotspots(), // uses 15-min in-memory cache
-  ]);
-
-  const response: AreaStatusResponse = {
-    lat,
-    lon,
-    fetchedAt: new Date().toISOString(),
-    weather: {
-      apparentTemperatureC: weather.apparentTemperatureC,
-      relativeHumidityPct: weather.relativeHumidityPct,
-      precipitationMm: weather.precipitationMm,
-      forecastHour: weather.forecastHourUtc,
-      isStale: weather.isStale,
-    },
-    activeIncidentCount: incidents.length,
-    hotspotCount: hotspots.length,
-    pilotZoneStatus: inside ? 'inside' : 'outside',
-  };
-
-  return {
-    statusCode: 200,
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(response),
-  };
 };

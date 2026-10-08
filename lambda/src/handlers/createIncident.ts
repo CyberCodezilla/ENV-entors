@@ -34,9 +34,10 @@ import {
 } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import { v4 as uuidv4 } from 'uuid';
+import { dynamoClient } from '../adapters/dynamodb';
 import { logger } from '../utils/logger';
 
-const client = new DynamoDBClient({ region: process.env.AWS_REGION ?? 'ap-south-1' });
+const client = dynamoClient;
 const INCIDENTS_TABLE = process.env.INCIDENTS_TABLE ?? 'heatflood-incidents';
 const RATE_LIMIT_PER_HOUR = 5;
 
@@ -54,17 +55,17 @@ async function checkRateLimit(clientIp: string, now: Date): Promise<boolean> {
   const hourBucket = now.toISOString().slice(0, 13); // "2026-07-18T09"
   const prefix = `ratelimit#${clientIp}#${hourBucket}`;
   const windowExpiry = Math.floor(now.getTime() / 1000) + 3600;
+  const partitionKey = `ratelimit#${clientIp}`;
 
   try {
-    // Query via geohash GSI — all ratelimit records share geohash='ratelimit'
-    // Filter down to this IP+hour bucket via begins_with on incidentId
+    // Query via geohash GSI — partitioned by IP to avoid global hot partition
     const result = await client.send(new QueryCommand({
       TableName: INCIDENTS_TABLE,
       IndexName: 'geohash-createdAt-index',
       KeyConditionExpression: 'geohash = :gh',
       FilterExpression: 'begins_with(incidentId, :prefix)',
       ExpressionAttributeValues: {
-        ':gh': { S: 'ratelimit' },
+        ':gh': { S: partitionKey },
         ':prefix': { S: prefix },
       },
     }));
@@ -77,7 +78,7 @@ async function checkRateLimit(clientIp: string, now: Date): Promise<boolean> {
       TableName: INCIDENTS_TABLE,
       Item: marshall({
         incidentId: `${prefix}#${uuidv4()}`,
-        geohash: 'ratelimit',
+        geohash: partitionKey,
         createdAt: now.toISOString(),
         expiresAt: new Date(windowExpiry * 1000).toISOString(),
         ttlEpoch: windowExpiry,
@@ -98,7 +99,7 @@ async function findCorroborating(
   lat: number, lon: number, type: string, now: Date
 ): Promise<number> {
   const geohash = encodeGeohash(lat, lon, 5); // explicit precision
-  const windowStart = new Date(now.getTime() - TTL_MINUTES.corroboratedReport * 60_000).toISOString();
+  const windowStart = new Date(now.getTime() - SEGMENT_PARAMS.corroborationWindowMinutes * 60_000).toISOString();
 
   try {
     const result = await client.send(new QueryCommand({
@@ -132,7 +133,17 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
   const now = new Date();
 
   try {
-    const body = JSON.parse(event.body ?? '{}');
+    let body: unknown;
+    try {
+      body = JSON.parse(event.body ?? '{}');
+    } catch {
+      return {
+        statusCode: 400,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ error: 'INVALID_JSON', detail: 'Malformed JSON request body' }),
+      };
+    }
+
     const req = CreateIncidentRequestSchema.parse(body);
 
     const allowed = await checkRateLimit(clientIp, now);
@@ -147,17 +158,18 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
       };
     }
 
-    const expiresAt = new Date(now.getTime() + TTL_MINUTES.unverifiedReport * 60_000);
-    const ttlEpoch = Math.floor(expiresAt.getTime() / 1000);
-
+    const unverifiedExpiry = new Date(now.getTime() + TTL_MINUTES.unverifiedReport * 60_000);
     const corroborating = await findCorroborating(req.latitude, req.longitude, req.type, now);
     const status = corroborating >= 2 ? 'corroborated' : 'pending';
     const effectiveExpiry = status === 'corroborated'
       ? new Date(now.getTime() + TTL_MINUTES.corroboratedReport * 60_000)
-      : expiresAt;
+      : unverifiedExpiry;
+    const ttlEpoch = Math.floor(effectiveExpiry.getTime() / 1000);
+
+    const incidentId = req.idempotencyKey || uuidv4();
 
     const incident: Incident & { ttlEpoch: number } = {
-      incidentId: uuidv4(),
+      incidentId,
       latitude: req.latitude,
       longitude: req.longitude,
       geohash: encodeGeohash(req.latitude, req.longitude, 5), // explicit precision
@@ -170,6 +182,8 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
       sourceType: 'community_report',
       isDemo: false,
       version: 1,
+      notes: req.notes ?? null,
+      mode: req.mode ?? null,
       ttlEpoch,
     };
 
@@ -180,7 +194,10 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         ConditionExpression: 'attribute_not_exists(incidentId)',
       }));
     } catch (err) {
-      if (err instanceof ConditionalCheckFailedException) {
+      const isDuplicate = err instanceof ConditionalCheckFailedException ||
+        (err as { name?: string })?.name === 'ConditionalCheckFailedException';
+
+      if (isDuplicate) {
         return {
           statusCode: 200,
           headers: { 'Content-Type': 'application/json' },

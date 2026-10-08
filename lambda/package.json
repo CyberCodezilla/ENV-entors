@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "HeatFlood Guardian Lambda handlers",
   "scripts": {
-    "build": "esbuild src/handlers/*.ts --bundle --platform=node --target=node20 --outdir=dist --external:aws-sdk",
+    "build": "esbuild src/handlers/*.ts --bundle --platform=node --target=node20 --outdir=dist --external:@aws-sdk/*",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -13,6 +13,7 @@
   },
   "devDependencies": {
     "@types/aws-lambda": "^8.10.145",
+    "@types/node": "^20.11.0",
     "@types/uuid": "^9.0.8",
     "@aws-sdk/client-dynamodb": "^3.500.0",
     "@aws-sdk/util-dynamodb": "^3.500.0",

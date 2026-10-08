@@ -13,13 +13,17 @@ Globals:
         AWS_NODEJS_CONNECTION_REUSE_ENABLED: '1'
         INCIDENTS_TABLE: !Ref IncidentsTable
         HOTSPOTS_TABLE: !Ref HotspotsTable
-        MAPBOX_TOKEN: !Sub '{{resolve:ssm:/heatflood/mapbox-token}}'
 
 Parameters:
   Stage:
     Type: String
     Default: dev
     AllowedValues: [dev, prod]
+  MapboxToken:
+    Type: String
+    Default: ''
+    NoEcho: true
+    Description: Mapbox Secret Token for Directions API
 
 Resources:
 
@@ -79,6 +83,9 @@ Resources:
       FunctionName: !Sub 'heatflood-analyseRoutes-${Stage}'
       Handler: dist/handlers/analyseRoutes.handler
       CodeUri: ../lambda
+      Environment:
+        Variables:
+          MAPBOX_TOKEN: !Ref MapboxToken
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref IncidentsTable
@@ -161,6 +168,20 @@ Resources:
           Properties:
             ApiId: !Ref HttpApi
             Path: /health
+            Method: GET
+
+  GetDemoScenarioFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'heatflood-getDemoScenario-${Stage}'
+      Handler: dist/handlers/getDemoScenario.handler
+      CodeUri: ../lambda
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /demo/scenarios/{id}
             Method: GET
 
   # ------------------------------------------------------------------ #

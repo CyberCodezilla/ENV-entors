@@ -34,6 +34,8 @@ export const IncidentStatusSchema = z.enum([
 export const IncidentTypeSchema = z.enum([
   'waterlogging',
   'road_blocked',
+  'underpass_flooded',
+  'extreme_heat',
   'electrical_hazard',
   'heat_exposure',
   'other',
@@ -44,6 +46,7 @@ export const DepthCategorySchema = z.enum([
   'ankle',
   'knee',
   'vehicle_impassable',
+  'none',
 ]);
 
 export const SourceTypeSchema = z.enum([
@@ -67,6 +70,8 @@ export const AnalyseRoutesRequestSchema = z.object({
   heatSensitive: z.boolean().optional().default(false),
   isReplay: z.boolean().optional().default(false),
   scenarioId: z.string().optional(),
+  _weatherOverride: z.record(z.unknown()).optional(),
+  _incidentOverrides: z.array(z.record(z.unknown())).optional(),
 });
 
 export type AnalyseRoutesRequest = z.infer<typeof AnalyseRoutesRequestSchema>;
@@ -97,6 +102,7 @@ export const SegmentAssessmentSchema = z.object({
   startCoord: LatLonSchema,
   endCoord: LatLonSchema,
   estimatedArrivalUtc: z.string().datetime({ offset: true }),
+  segmentLengthM: z.number().min(0).optional(),
 
   floodRisk: z.number().min(0).max(100),
   heatRisk: z.number().min(0).max(100),
@@ -224,6 +230,8 @@ export const IncidentSchema = z.object({
   sourceType: z.literal('community_report'),
   isDemo: z.boolean().default(false),
   version: z.number().int().min(1),
+  notes: z.string().max(280).optional().nullable(),
+  mode: TravelModeSchema.optional().nullable(),
 });
 
 export type Incident = z.infer<typeof IncidentSchema>;
@@ -249,3 +257,24 @@ export const AreaStatusResponseSchema = z.object({
 });
 
 export type AreaStatusResponse = z.infer<typeof AreaStatusResponseSchema>;
+
+export const CreateIncidentResponseSchema = z.object({
+  incidentId: z.string(),
+  status: IncidentStatusSchema,
+  expiresAt: z.string().datetime({ offset: true }),
+  duplicate: z.boolean().optional(),
+});
+export type CreateIncidentResponse = z.infer<typeof CreateIncidentResponseSchema>;
+
+export const ListIncidentsResponseSchema = z.object({
+  incidents: z.array(z.record(z.unknown())),
+  count: z.number().int().min(0),
+  fetchedAt: z.string().datetime({ offset: true }),
+  bbox: z.object({
+    lngMin: z.number(),
+    latMin: z.number(),
+    lngMax: z.number(),
+    latMax: z.number(),
+  }),
+});
+export type ListIncidentsResponse = z.infer<typeof ListIncidentsResponseSchema>;

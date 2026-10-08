@@ -12,7 +12,6 @@
  */
 import {
   SegmentAssessment,
-  SEGMENT_PARAMS,
   haversineDistanceM,
   encodeGeohash,
   ML_FEATURE_VERSION,
@@ -66,7 +65,7 @@ export async function scoreSegment(input: SegmentInput): Promise<SegmentAssessme
   }
 
   // Cache verified incidents — used by both confidence and ML features
-  const verifiedIncidents = input.nearbyIncidents.filter(i => i.status === 'verified');
+  const verifiedIncidents = input.nearbyIncidents.filter(i => i.status === 'verified' || i.status === 'corroborated');
 
   // Hoist arrival Date — reused for hour/day/month extraction
   const arrivalDate = input.estimatedArrivalUtc;
@@ -172,6 +171,7 @@ export async function scoreSegment(input: SegmentInput): Promise<SegmentAssessme
     startCoord: input.startCoord,
     endCoord: input.endCoord,
     estimatedArrivalUtc: arrivalDate.toISOString(),
+    segmentLengthM: input.segmentLengthM,
 
     floodRisk: flood.score,
     heatRisk: heat.score,

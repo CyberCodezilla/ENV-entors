@@ -147,10 +147,17 @@ export function rankRoutes(rawRoutes: RawRoute[]): {
   const viableRoutes = evaluated.filter(r => !r.isHardBlocked);
   const blockedRoutes = evaluated.filter(r => r.isHardBlocked);
 
+  // Sort viable routes: lowest max flood risk -> lowest weighted flood exposure -> lowest weighted heat exposure -> lowest duration
   viableRoutes.sort((a, b) => {
     if (a.maxFloodRisk !== b.maxFloodRisk) return a.maxFloodRisk - b.maxFloodRisk;
     if (a.weightedFloodExposure !== b.weightedFloodExposure) return a.weightedFloodExposure - b.weightedFloodExposure;
     if (a.weightedHeatExposure !== b.weightedHeatExposure) return a.weightedHeatExposure - b.weightedHeatExposure;
+    return a.durationSec - b.durationSec;
+  });
+
+  // Sort blocked routes consistently by flood risk then duration
+  blockedRoutes.sort((a, b) => {
+    if (a.maxFloodRisk !== b.maxFloodRisk) return a.maxFloodRisk - b.maxFloodRisk;
     return a.durationSec - b.durationSec;
   });
 
@@ -159,9 +166,10 @@ export function rankRoutes(rawRoutes: RawRoute[]): {
 
   const allRoutes = [...viableRoutes, ...blockedRoutes];
 
-  const hasConfidentRecommendation = viableRoutes.length > 0;
+  const confidentViableRoutes = viableRoutes.filter(r => r.overallConfidenceLevel !== 'limited');
+  const hasConfidentRecommendation = confidentViableRoutes.length > 0;
   const noConfidentRouteReason = !hasConfidentRecommendation
-    ? 'All available routes intersect active hazard evidence. Delay travel or check official guidance before proceeding.'
+    ? 'All available routes intersect active hazard evidence or have limited confidence. Delay travel or check official guidance before proceeding.'
     : null;
 
   return { routes: allRoutes, hasConfidentRecommendation, noConfidentRouteReason };

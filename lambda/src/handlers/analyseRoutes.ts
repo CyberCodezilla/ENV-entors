@@ -22,13 +22,10 @@ import {
   splitRouteIntoSegments,
   haversineDistanceM,
   SEGMENT_PARAMS,
-  PILOT_BBOX,
-  isInsidePilotZone,
-  ROUTE_DISCLAIMER,
 } from '@heatflood/shared';
-import { fetchMapboxRoutes, MapboxRoute } from '../adapters/mapbox';
+import { fetchMapboxRoutes } from '../adapters/mapbox';
 import { fetchWeather, WeatherSnapshot } from '../adapters/openMeteo';
-import { fetchNearbyIncidents, fetchAllHotspots } from '../adapters/dynamodb';
+import { fetchNearbyIncidents } from '../adapters/dynamodb';
 import { getHotspots } from '../utils/hotspotCache';
 import { scoreSegment } from '../engine/segmentScorer';
 import { rankRoutes, RawRoute } from '../engine/routeRanker';
@@ -56,7 +53,17 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
   const now = new Date();
 
   try {
-    const body = JSON.parse(event.body ?? '{}');
+    let body: unknown;
+    try {
+      body = JSON.parse(event.body ?? '{}');
+    } catch {
+      return {
+        statusCode: 400,
+        headers: { 'Content-Type': 'application/json', 'X-Request-Id': requestId },
+        body: JSON.stringify({ error: 'INVALID_JSON', detail: 'Malformed JSON request body', requestId }),
+      };
+    }
+
     const request = AnalyseRoutesRequestSchema.parse(body);
 
     const isReplay = request.isReplay === true;
@@ -87,17 +94,36 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     let incidents: ActiveIncident[];
     let hotspots: FloodHotspot[];
 
-    if (isReplay && body._weatherOverride) {
-      weather = buildReplayWeather(body._weatherOverride as Record<string, unknown>);
-      incidents = (body._incidentOverrides ?? []) as ActiveIncident[];
+    if (isReplay && request._weatherOverride) {
+      weather = buildReplayWeather(request._weatherOverride as Record<string, unknown>);
+      incidents = (request._incidentOverrides ?? []) as unknown as ActiveIncident[];
       hotspots = await getHotspots();
       logger.info('analyseRoutes: replay mode active', { scenarioId });
     } else {
-      [weather, incidents, hotspots] = await Promise.all([
+      // Multi-point hazard sample: origin, destination, and midpoint to ensure full route coverage
+      const samplePoints = [
+        { lat: request.origin.lat, lon: request.origin.lon },
+        { lat: request.destination.lat, lon: request.destination.lon },
+        { lat: midLat, lon: midLon },
+      ];
+
+      const [weatherRes, incidentsLists, hotspotsRes] = await Promise.all([
         fetchWeather(midLat, midLon, departureTime),
-        fetchNearbyIncidents(midLat, midLon),
+        Promise.all(samplePoints.map(p => fetchNearbyIncidents(p.lat, p.lon))),
         getHotspots(),
       ]);
+
+      weather = weatherRes;
+      hotspots = hotspotsRes;
+
+      // Merge and deduplicate incidents across all sampled points
+      const incidentMap = new Map<string, ActiveIncident>();
+      for (const list of incidentsLists) {
+        for (const inc of list) {
+          incidentMap.set(inc.incidentId, inc);
+        }
+      }
+      incidents = Array.from(incidentMap.values());
     }
 
     // ---- Score each route ----
@@ -106,13 +132,15 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         const coords = route.geometry.coordinates;
         const segs = splitRouteIntoSegments(coords, SEGMENT_PARAMS.maxSegmentLengthM);
 
-        // Pre-compute arrival time per segment BEFORE Promise.all fan-out.
-        // Mutating a shared cumulativeSec variable inside concurrent async
-        // closures is a race condition — compute the full sequence first.
+        // Pre-compute arrival time per segment based on mode-appropriate travel speed
+        const speedMps = request.mode === 'walking'
+          ? 1.2
+          : Math.max(3.0, route.distanceM / Math.max(1, route.durationSec));
+
         let cumulativeSec = 0;
         const arrivalTimes: Date[] = segs.map((seg) => {
           const arrival = new Date(departureTime.getTime() + cumulativeSec * 1000);
-          cumulativeSec += seg.lengthM / 1.2; // ~1.2 m/s walking
+          cumulativeSec += seg.lengthM / speedMps;
           return arrival;
         });
 

@@ -11,12 +11,9 @@
 import {
   HEAT_SCORE_WEIGHTS,
   HEAT_BANDS,
-  RISK_THRESHOLDS,
-  RiskLevelSchema,
+  scoreToLevel,
+  RiskLevel,
 } from '@heatflood/shared';
-import type { z } from 'zod';
-
-export type RiskLevel = z.infer<typeof RiskLevelSchema>;
 
 export interface HeatRiskInput {
   apparentTemperatureC: number | null;
@@ -65,18 +62,13 @@ function departureHourContribution(arrivalUtc: Date): number {
 function walkDurationContribution(durationSec: number, mode: string): number {
   if (mode !== 'walking') return 0;
   const minutes = durationSec / 60;
-  if (minutes <= 5) return 10;
-  if (minutes <= 15) return 30;
-  if (minutes <= 30) return 60;
+  if (minutes <= 3) return 10;
+  if (minutes <= 10) return 30;
+  if (minutes <= 25) return 60;
   return 85;
 }
 
-function scoreToLevel(score: number): RiskLevel {
-  if (score <= RISK_THRESHOLDS.low) return 'low';
-  if (score <= RISK_THRESHOLDS.moderate) return 'moderate';
-  if (score <= RISK_THRESHOLDS.high) return 'high';
-  return 'blocked';
-}
+
 
 export function calculateHeatRisk(input: HeatRiskInput): HeatRiskOutput {
   const { apparentTemperatureC, estimatedArrivalUtc, segmentWalkDurationSec, heatSensitive, mode } = input;
@@ -85,15 +77,13 @@ export function calculateHeatRisk(input: HeatRiskInput): HeatRiskOutput {
   const { contribution: tempScore, band } = tempContributionWithBand(apparentTemperatureC);
   const hourScore = departureHourContribution(estimatedArrivalUtc);
   const walkScore = walkDurationContribution(segmentWalkDurationSec, mode);
-  const sensitivityMultiplier = heatSensitive ? 1.15 : 1.0;
-
   const baseScore =
     tempScore * HEAT_SCORE_WEIGHTS.apparentTempBand +
     walkScore * HEAT_SCORE_WEIGHTS.walkingDuration +
     hourScore * HEAT_SCORE_WEIGHTS.departureHour +
     (heatSensitive ? 100 : 0) * HEAT_SCORE_WEIGHTS.userSensitivity;
 
-  const score = Math.min(100, Math.round(baseScore * sensitivityMultiplier));
+  const score = Math.min(100, Math.round(baseScore));
 
   const reasons: string[] = [];
   if (apparentTemperatureC === null) {

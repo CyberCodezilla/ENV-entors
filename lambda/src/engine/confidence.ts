@@ -9,13 +9,10 @@
  */
 import {
   CONFIDENCE_WEIGHTS,
-  CONFIDENCE_THRESHOLDS,
   TTL_MINUTES,
-  ConfidenceLevelSchema,
+  confidenceLevelFromScore,
+  ConfidenceLevel,
 } from '@heatflood/shared';
-import type { z } from 'zod';
-
-export type ConfidenceLevel = z.infer<typeof ConfidenceLevelSchema>;
 
 export interface ConfidenceInput {
   weatherAgeMinutes: number | null;
@@ -65,12 +62,6 @@ function corroborationScore(incidentCount: number, conflicting: boolean): number
   return 60;
 }
 
-function levelFromScore(score: number): ConfidenceLevel {
-  if (score <= CONFIDENCE_THRESHOLDS.limited) return 'limited';
-  if (score <= CONFIDENCE_THRESHOLDS.moderate) return 'moderate';
-  return 'good';
-}
-
 export function calculateConfidence(input: ConfidenceInput): ConfidenceOutput {
   const {
     weatherAgeMinutes,
@@ -105,5 +96,5 @@ export function calculateConfidence(input: ConfidenceInput): ConfidenceOutput {
   if (incidentCount === 0) reasons.push('No community reports in this area — assessment based on weather and historical data only');
   if (verifiedIncidentCount > 0) reasons.push(`${verifiedIncidentCount} verified report(s) increase confidence`);
 
-  return { score, level: levelFromScore(score), isStaleWeather, reasons };
+  return { score, level: confidenceLevelFromScore(score), isStaleWeather, reasons };
 }

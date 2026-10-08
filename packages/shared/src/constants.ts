@@ -95,6 +95,7 @@ export const HARD_BLOCK_SOURCES = [
 export const HARD_BLOCK_TYPES = [
   'road_blocked',
   'electrical_hazard',
+  'underpass_flooded',
 ] as const;
 
 // ---------------------------------------------------------------------------

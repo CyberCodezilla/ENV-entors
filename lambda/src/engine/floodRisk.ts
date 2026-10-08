@@ -15,14 +15,12 @@ import {
   HARD_BLOCK_SOURCES,
   HARD_BLOCK_TYPES,
   TTL_MINUTES,
-  RiskLevelSchema,
-  RISK_THRESHOLDS,
+  scoreToLevel,
+  RiskLevel,
   EvidenceItem,
   IncidentTypeSchema,
 } from '@heatflood/shared';
 import type { z } from 'zod';
-
-export type RiskLevel = z.infer<typeof RiskLevelSchema>;
 
 export interface ActiveIncident {
   incidentId: string;
@@ -105,7 +103,7 @@ function reportContribution(
     const isVerified = inc.status === 'verified' || inc.status === 'corroborated';
 
     // Hoist display strings — each replace allocates a new string
-    const typeDisplay = inc.type.replace('_', ' ');
+    const typeDisplay = inc.type.replace(/_/g, ' ');
     const sourceDisplay = inc.sourceType.replace(/_/g, ' ');
     const demoTag = inc.isDemo ? ' [DEMO]' : '';
 
@@ -172,12 +170,7 @@ function hotspotContribution(hotspotDistanceM: number | null, overlap: boolean):
   return 0;
 }
 
-function scoreToLevel(score: number): RiskLevel {
-  if (score <= RISK_THRESHOLDS.low) return 'low';
-  if (score <= RISK_THRESHOLDS.moderate) return 'moderate';
-  if (score <= RISK_THRESHOLDS.high) return 'high';
-  return 'blocked';
-}
+
 
 // ---------------------------------------------------------------------------
 // Main export
@@ -201,13 +194,19 @@ export function calculateFloodRisk(input: FloodRiskInput): FloodRiskOutput {
     };
   }
 
+  const activeWeightSum =
+    FLOOD_SCORE_WEIGHTS.rainSignal +
+    FLOOD_SCORE_WEIGHTS.hotspotPrior +
+    FLOOD_SCORE_WEIGHTS.reportSignal;
+
+  const rawWeightedScore =
+    rainScore * FLOOD_SCORE_WEIGHTS.rainSignal +
+    hotScore * FLOOD_SCORE_WEIGHTS.hotspotPrior +
+    reportResult.score * FLOOD_SCORE_WEIGHTS.reportSignal;
+
   const weightedScore = Math.min(
     100,
-    Math.round(
-      rainScore * FLOOD_SCORE_WEIGHTS.rainSignal +
-      hotScore * (FLOOD_SCORE_WEIGHTS.hotspotPrior / 0.15) * 0.15 +
-      reportResult.score * FLOOD_SCORE_WEIGHTS.reportSignal,
-    ),
+    Math.round(rawWeightedScore / activeWeightSum),
   );
 
   const reasons: string[] = [];

@@ -76,9 +76,10 @@ export async function fetchWeather(
       if (diff < bestDiff) {
         bestDiff = diff;
         bestIdx = i;
+      } else if (i > 0) {
         // Early-exit: once diff starts increasing we’ve passed the minimum
         // (slots are monotonically increasing in time)
-        if (i > 0 && diff > bestDiff) break;
+        break;
       }
     }
 

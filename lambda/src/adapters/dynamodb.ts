@@ -19,9 +19,24 @@ import { encodeGeohash, PILOT_BBOX } from '@heatflood/shared';
 import { ActiveIncident, FloodHotspot } from '../engine/floodRisk';
 import { logger } from '../utils/logger';
 
-const client = new DynamoDBClient({ region: process.env.AWS_REGION ?? 'ap-south-1' });
+export const dynamoClient = new DynamoDBClient({ region: process.env.AWS_REGION ?? 'ap-south-1' });
+const client = dynamoClient;
 const INCIDENTS_TABLE = process.env.INCIDENTS_TABLE ?? 'heatflood-incidents';
 const HOTSPOTS_TABLE = process.env.HOTSPOTS_TABLE ?? 'heatflood-hotspots';
+
+function getGeohashNeighbors5(lat: number, lon: number): string[] {
+  const dLat = 0.035;
+  const dLon = 0.035;
+  const hashes = new Set<string>();
+  for (const latOffset of [-dLat, 0, dLat]) {
+    for (const lonOffset of [-dLon, 0, dLon]) {
+      const targetLat = Math.max(-90, Math.min(90, lat + latOffset));
+      const targetLon = Math.max(-180, Math.min(180, lon + lonOffset));
+      hashes.add(encodeGeohash(targetLat, targetLon, 5));
+    }
+  }
+  return Array.from(hashes);
+}
 
 /**
  * Fetch active incidents within geohash cells covering the area around a point.
@@ -31,33 +46,39 @@ export async function fetchNearbyIncidents(
   lat: number,
   lon: number,
 ): Promise<ActiveIncident[]> {
-  const centreHash = encodeGeohash(lat, lon, 5);
+  const geohashes = getGeohashNeighbors5(lat, lon);
   const now = new Date().toISOString();
-
-  const incidents: ActiveIncident[] = [];
+  const incidentMap = new Map<string, ActiveIncident>();
 
   try {
-    const result = await client.send(new QueryCommand({
-      TableName: INCIDENTS_TABLE,
-      IndexName: 'geohash-createdAt-index',
-      KeyConditionExpression: 'geohash = :gh',
-      FilterExpression: 'expiresAt > :now AND #s <> :rejected',
-      ExpressionAttributeNames: { '#s': 'status' },
-      ExpressionAttributeValues: {
-        ':gh': { S: centreHash },
-        ':now': { S: now },
-        ':rejected': { S: 'rejected' },
-      },
-    }));
+    const results = await Promise.all(
+      geohashes.map(gh =>
+        client.send(new QueryCommand({
+          TableName: INCIDENTS_TABLE,
+          IndexName: 'geohash-createdAt-index',
+          KeyConditionExpression: 'geohash = :gh',
+          FilterExpression: 'expiresAt > :now AND #s <> :rejected',
+          ExpressionAttributeNames: { '#s': 'status' },
+          ExpressionAttributeValues: {
+            ':gh': { S: gh },
+            ':now': { S: now },
+            ':rejected': { S: 'rejected' },
+          },
+        }))
+      )
+    );
 
-    for (const item of result.Items ?? []) {
-      incidents.push(unmarshall(item) as ActiveIncident);
+    for (const res of results) {
+      for (const item of res.Items ?? []) {
+        const inc = unmarshall(item) as ActiveIncident;
+        incidentMap.set(inc.incidentId, inc);
+      }
     }
   } catch (err) {
-    logger.warn('DynamoDB fetchNearbyIncidents failed', { err, centreHash });
+    logger.warn('DynamoDB fetchNearbyIncidents failed', { err, lat, lon });
   }
 
-  return incidents;
+  return Array.from(incidentMap.values());
 }
 
 /**
