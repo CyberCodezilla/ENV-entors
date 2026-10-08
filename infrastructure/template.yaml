@@ -81,7 +81,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub 'heatflood-analyseRoutes-${Stage}'
-      Handler: dist/handlers/analyseRoutes.handler
+      Handler: dist/analyseRoutes.handler
       CodeUri: ../lambda
       Environment:
         Variables:
@@ -105,7 +105,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub 'heatflood-getStatus-${Stage}'
-      Handler: dist/handlers/getStatus.handler
+      Handler: dist/getStatus.handler
       CodeUri: ../lambda
       Policies:
         - DynamoDBReadPolicy:
@@ -124,7 +124,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub 'heatflood-createIncident-${Stage}'
-      Handler: dist/handlers/createIncident.handler
+      Handler: dist/createIncident.handler
       CodeUri: ../lambda
       Policies:
         - DynamoDBCrudPolicy:
@@ -143,7 +143,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub 'heatflood-listIncidents-${Stage}'
-      Handler: dist/handlers/listIncidents.handler
+      Handler: dist/listIncidents.handler
       CodeUri: ../lambda
       Policies:
         - DynamoDBReadPolicy:
@@ -160,7 +160,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub 'heatflood-health-${Stage}'
-      Handler: dist/handlers/health.handler
+      Handler: dist/health.handler
       CodeUri: ../lambda
       Events:
         Api:
@@ -174,7 +174,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub 'heatflood-getDemoScenario-${Stage}'
-      Handler: dist/handlers/getDemoScenario.handler
+      Handler: dist/getDemoScenario.handler
       CodeUri: ../lambda
       Events:
         Api:
