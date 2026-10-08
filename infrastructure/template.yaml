@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: HeatFlood Guardian — SAM template (Day 3)
+Description: HeatFlood Guardian — SAM template with Security & DevOps Enhancements
 
 Globals:
   Function:
@@ -24,6 +24,10 @@ Parameters:
     Default: ''
     NoEcho: true
     Description: Mapbox Secret Token for Directions API
+  AllowedOrigins:
+    Type: CommaDelimitedList
+    Default: 'https://heatflood.dev, http://localhost:3000'
+    Description: Allowed origins for API Gateway CORS configuration
 
 Resources:
 
@@ -74,6 +78,76 @@ Resources:
           KeyType: HASH
 
   # ------------------------------------------------------------------ #
+  # Cognito Auth & RBAC
+  # ------------------------------------------------------------------ #
+
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub 'heatflood-user-pool-${Stage}'
+      AutoVerifiedAttributes:
+        - email
+      UsernameAttributes:
+        - email
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub 'heatflood-client-${Stage}'
+      UserPoolId: !Ref UserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+
+  ModeratorUserGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: Moderators
+      Description: Administrative group for incident moderation and verification
+      UserPoolId: !Ref UserPool
+
+  # ------------------------------------------------------------------ #
+  # AWS WAF Rate-Limiting Protection
+  # ------------------------------------------------------------------ #
+
+  ApiWebACL:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name: !Sub 'heatflood-webacl-${Stage}'
+      Scope: REGIONAL
+      DefaultAction:
+        Allow: {}
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName: HeatFloodWebACL
+      Rules:
+        - Name: IPBasedRateLimitRule
+          Priority: 1
+          Action:
+            Block: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: IPBasedRateLimitRule
+          Statement:
+            RateBasedStatement:
+              Limit: 300
+              AggregateKeyType: IP
+
+  # ------------------------------------------------------------------ #
+  # Secrets Manager & Dynamic References
+  # ------------------------------------------------------------------ #
+
+  MapboxSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub 'heatflood/mapbox-token-${Stage}'
+      Description: Centralized Mapbox API token with Secrets Manager dynamic rotation
+      SecretString: !Sub '{"token":"${MapboxToken}"}'
+
+  # ------------------------------------------------------------------ #
   # Lambda Functions
   # ------------------------------------------------------------------ #
 
@@ -85,7 +159,7 @@ Resources:
       CodeUri: ../lambda
       Environment:
         Variables:
-          MAPBOX_TOKEN: !Ref MapboxToken
+          MAPBOX_TOKEN: '{{resolve:ssm:/heatflood/mapbox-token}}'
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref IncidentsTable
@@ -100,6 +174,8 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /routes/analyse
             Method: POST
+            Auth:
+              Authorizer: NONE
 
   GetStatusFunction:
     Type: AWS::Serverless::Function
@@ -119,6 +195,8 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /status
             Method: GET
+            Auth:
+              Authorizer: NONE
 
   CreateIncidentFunction:
     Type: AWS::Serverless::Function
@@ -138,6 +216,8 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /incidents
             Method: POST
+            Auth:
+              Authorizer: CognitoAuthorizer
 
   ListIncidentsFunction:
     Type: AWS::Serverless::Function
@@ -155,6 +235,8 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /incidents
             Method: GET
+            Auth:
+              Authorizer: NONE
 
   HealthFunction:
     Type: AWS::Serverless::Function
@@ -169,6 +251,8 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /health
             Method: GET
+            Auth:
+              Authorizer: NONE
 
   GetDemoScenarioFunction:
     Type: AWS::Serverless::Function
@@ -183,6 +267,8 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /demo/scenarios/{id}
             Method: GET
+            Auth:
+              Authorizer: NONE
 
   # ------------------------------------------------------------------ #
   # API Gateway
@@ -194,8 +280,7 @@ Resources:
       Name: !Sub 'heatflood-api-${Stage}'
       StageName: !Ref Stage
       CorsConfiguration:
-        AllowOrigins:
-          - '*'
+        AllowOrigins: !Ref AllowedOrigins
         AllowMethods:
           - GET
           - POST
@@ -203,6 +288,17 @@ Resources:
         AllowHeaders:
           - Content-Type
           - X-Request-Id
+          - Authorization
+      Auth:
+        Authorizers:
+          CognitoAuthorizer:
+            AuthorizationScopes:
+              - openid
+            IdentitySource: $request.header.Authorization
+            JwtConfiguration:
+              issuer: !Sub 'https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}'
+              audience:
+                - !Ref UserPoolClient
 
 Outputs:
   ApiUrl:
@@ -212,3 +308,10 @@ Outputs:
     Value: !Ref IncidentsTable
   HotspotsTableName:
     Value: !Ref HotspotsTable
+  UserPoolId:
+    Value: !Ref UserPool
+  UserPoolClientId:
+    Value: !Ref UserPoolClient
+  WebACLArn:
+    Value: !GetAtt ApiWebACL.Arn
+
