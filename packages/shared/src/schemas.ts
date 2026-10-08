@@ -17,8 +17,10 @@ export const LatLonSchema = z.object({
 export const TravelModeSchema = z.enum(['walking', 'driving-traffic']);
 
 export const RiskLevelSchema = z.enum(['low', 'moderate', 'high', 'blocked']);
+export type RiskLevel = z.infer<typeof RiskLevelSchema>;
 
 export const ConfidenceLevelSchema = z.enum(['limited', 'moderate', 'good']);
+export type ConfidenceLevel = z.infer<typeof ConfidenceLevelSchema>;
 
 export const IncidentStatusSchema = z.enum([
   'pending',

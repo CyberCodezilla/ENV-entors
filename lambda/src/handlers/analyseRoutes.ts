@@ -219,14 +219,14 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     if (err instanceof ZodError) {
       return {
         statusCode: 400,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Request-Id': requestId },
         body: JSON.stringify({ error: 'VALIDATION_ERROR', details: err.errors }),
       };
     }
     logger.error('analyseRoutes unhandled error', { requestId, err });
     return {
       statusCode: 500,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Request-Id': requestId },
       body: JSON.stringify({ error: 'INTERNAL_ERROR', requestId }),
     };
   }

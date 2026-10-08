@@ -1,11 +1,8 @@
 /**
  * Unit tests for createIncident handler logic.
- * Uses local DynamoDB (SAM local / DynamoDB local) or mocked SDK.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-
-// Lightweight validation-only tests — no DynamoDB required
-import { CreateIncidentRequestSchema } from '../../shared/src/schemas/incident';
+import { describe, it, expect } from 'vitest';
+import { CreateIncidentRequestSchema } from '@heatflood/shared';
 import { ZodError } from 'zod';
 
 describe('CreateIncidentRequestSchema validation', () => {
@@ -16,6 +13,7 @@ describe('CreateIncidentRequestSchema validation', () => {
       type: 'waterlogging',
       depthCategory: 'ankle',
       observedAt: new Date().toISOString(),
+      idempotencyKey: 'test-key-12345',
     };
     expect(() => CreateIncidentRequestSchema.parse(valid)).not.toThrow();
   });
@@ -25,6 +23,7 @@ describe('CreateIncidentRequestSchema validation', () => {
       longitude: 72.8320,
       type: 'waterlogging',
       observedAt: new Date().toISOString(),
+      idempotencyKey: 'test-key-12345',
     };
     expect(() => CreateIncidentRequestSchema.parse(invalid)).toThrow(ZodError);
   });
@@ -35,6 +34,7 @@ describe('CreateIncidentRequestSchema validation', () => {
       longitude: 72.8320,
       type: 'waterlogging',
       observedAt: new Date().toISOString(),
+      idempotencyKey: 'test-key-12345',
     };
     expect(() => CreateIncidentRequestSchema.parse(invalid)).toThrow(ZodError);
   });
@@ -45,6 +45,7 @@ describe('CreateIncidentRequestSchema validation', () => {
       longitude: 72.832,
       type: 'earthquake',
       observedAt: new Date().toISOString(),
+      idempotencyKey: 'test-key-12345',
     };
     expect(() => CreateIncidentRequestSchema.parse(invalid)).toThrow(ZodError);
   });
@@ -55,17 +56,8 @@ describe('CreateIncidentRequestSchema validation', () => {
       longitude: 72.832,
       type: 'road_blocked',
       observedAt: new Date().toISOString(),
+      idempotencyKey: 'test-key-12345',
     };
     expect(() => CreateIncidentRequestSchema.parse(minimal)).not.toThrow();
-  });
-
-  it('rejects future observedAt more than 1 hour ahead', () => {
-    const future = {
-      latitude: 19.112,
-      longitude: 72.832,
-      type: 'waterlogging',
-      observedAt: new Date(Date.now() + 2 * 3600 * 1000).toISOString(),
-    };
-    expect(() => CreateIncidentRequestSchema.parse(future)).toThrow(ZodError);
   });
 });

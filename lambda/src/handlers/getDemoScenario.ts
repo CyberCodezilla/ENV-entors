@@ -43,7 +43,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
   if (!VALID_ID_SET.has(id)) {
     return {
       statusCode: 404,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' },
       body: JSON.stringify({
         error: 'SCENARIO_NOT_FOUND',
         validIds: VALID_IDS,
@@ -57,6 +57,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     logger.error('getDemoScenario: file not found in cache', { id });
     return {
       statusCode: 500,
+      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' },
       body: JSON.stringify({ error: 'SCENARIO_READ_ERROR' }),
     };
   }

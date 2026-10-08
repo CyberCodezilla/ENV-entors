@@ -19,19 +19,20 @@ async function apiPost<Req, Res>(path: string, body: Req): Promise<Res> {
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err?.error ?? `API error ${res.status}`);
+    const err = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(err.error ?? `API error ${res.status}`);
   }
   return res.json() as Promise<Res>;
 }
 
 async function apiGet<Res>(path: string, params?: Record<string, string>): Promise<Res> {
-  const url = new URL(`${BASE}${path}`, window.location.origin);
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
+  const url = new URL(`${BASE}${path}`, origin);
   if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
   const res = await fetch(url.toString());
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err?.error ?? `API error ${res.status}`);
+    const err = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(err.error ?? `API error ${res.status}`);
   }
   return res.json() as Promise<Res>;
 }

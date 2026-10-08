@@ -106,7 +106,9 @@ export function Map({ routes, selectedRouteId, incidents, onBboxChange, onReques
 
     const emitBbox = () => {
       const b = map.getBounds();
-      onBboxChange?.([b.getWest(), b.getSouth(), b.getEast(), b.getNorth()]);
+      if (b) {
+        onBboxChange?.([b.getWest(), b.getSouth(), b.getEast(), b.getNorth()]);
+      }
     };
     map.on('moveend', emitBbox);
     map.on('zoomend', emitBbox);
@@ -180,7 +182,7 @@ export function Map({ routes, selectedRouteId, incidents, onBboxChange, onReques
             confidenceLevel: seg.confidenceLevel,
             hardBlock: seg.hardBlock,
             hardBlockReason: seg.hardBlockReason,
-            segmentLengthM: seg.segmentLengthM ?? 0,
+            segmentLengthM: (seg as { segmentLengthM?: number }).segmentLengthM ?? 0,
             reasons: JSON.stringify(seg.reasons ?? []),
           },
         };

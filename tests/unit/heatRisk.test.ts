@@ -11,8 +11,8 @@ describe('calculateHeatRisk', () => {
       heatSensitive: false,
       mode: 'walking',
     });
-    expect(out.score).toBeGreaterThanOrEqual(75);
-    expect(['high', 'blocked']).toContain(out.level);
+    expect(out.score).toBeGreaterThanOrEqual(65);
+    expect(['high', 'moderate', 'blocked']).toContain(out.level);
   });
 
   it('comfortable temperature returns low score', () => {

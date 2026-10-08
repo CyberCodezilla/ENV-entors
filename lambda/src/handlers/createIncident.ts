@@ -116,8 +116,8 @@ async function findCorroborating(
       },
     }));
 
-    const nearby = (result.Items ?? []).map(i => unmarshall(i) as Incident);
-    return nearby.filter(inc =>
+    const nearby = (result.Items ?? []).map((i: Record<string, unknown>) => unmarshall(i as Record<string, import('@aws-sdk/client-dynamodb').AttributeValue>) as Incident);
+    return nearby.filter((inc: Incident) =>
       haversineDistanceM(lat, lon, inc.latitude, inc.longitude)
       <= SEGMENT_PARAMS.corroborationRadius
     ).length;

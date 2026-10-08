@@ -82,8 +82,8 @@ export function rankRoutes(rawRoutes: RawRoute[]): {
 
     for (let i = 0; i < n; i++) {
       const s = segs[i];
-      const [lon1, lat1] = s.startCoord as unknown as [number, number];
-      const [lon2, lat2] = s.endCoord as unknown as [number, number];
+      const { lon: lon1, lat: lat1 } = s.startCoord;
+      const { lon: lon2, lat: lat2 } = s.endCoord;
       const w = Math.sqrt((lon2 - lon1) ** 2 + (lat2 - lat1) ** 2);
 
       floodRisks[i] = s.floodRisk;

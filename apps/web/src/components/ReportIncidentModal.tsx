@@ -49,6 +49,7 @@ export function ReportIncidentModal({ lat, lon, onClose, onSuccess }: Props) {
         type: type as CreateIncidentRequest['type'],
         depthCategory: depth as CreateIncidentRequest['depthCategory'],
         observedAt: new Date().toISOString(),
+        idempotencyKey: `report-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
       };
       const res = await api.createIncident(req);
       onSuccess(res.incidentId);
