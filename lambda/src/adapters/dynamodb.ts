@@ -82,6 +82,55 @@ export async function fetchNearbyIncidents(
 }
 
 /**
+ * Fetch active incidents across multiple sample points, deduplicating geohashes
+ * to minimize DynamoDB QueryCommand calls.
+ */
+export async function fetchIncidentsForPoints(
+  points: Array<{ lat: number; lon: number }>,
+): Promise<ActiveIncident[]> {
+  const geohashSet = new Set<string>();
+  for (const p of points) {
+    const neighbors = getGeohashNeighbors5(p.lat, p.lon);
+    for (const gh of neighbors) {
+      geohashSet.add(gh);
+    }
+  }
+
+  const now = new Date().toISOString();
+  const incidentMap = new Map<string, ActiveIncident>();
+
+  try {
+    const results = await Promise.all(
+      Array.from(geohashSet).map(gh =>
+        client.send(new QueryCommand({
+          TableName: INCIDENTS_TABLE,
+          IndexName: 'geohash-createdAt-index',
+          KeyConditionExpression: 'geohash = :gh',
+          FilterExpression: 'expiresAt > :now AND #s <> :rejected',
+          ExpressionAttributeNames: { '#s': 'status' },
+          ExpressionAttributeValues: {
+            ':gh': { S: gh },
+            ':now': { S: now },
+            ':rejected': { S: 'rejected' },
+          },
+        }))
+      )
+    );
+
+    for (const res of results) {
+      for (const item of res.Items ?? []) {
+        const inc = unmarshall(item) as ActiveIncident;
+        incidentMap.set(inc.incidentId, inc);
+      }
+    }
+  } catch (err) {
+    logger.warn('DynamoDB fetchIncidentsForPoints failed', { err });
+  }
+
+  return Array.from(incidentMap.values());
+}
+
+/**
  * Fetch all hotspots from the static hotspots table (small, full-scan acceptable).
  * Cached in Lambda memory between invocations via hotspotCache.ts.
  */

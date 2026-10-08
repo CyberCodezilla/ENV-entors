@@ -27,7 +27,7 @@ import {
 } from '@heatflood/shared';
 import { fetchMapboxRoutes } from '../adapters/mapbox';
 import { fetchWeather, WeatherSnapshot } from '../adapters/openMeteo';
-import { fetchNearbyIncidents } from '../adapters/dynamodb';
+import { fetchNearbyIncidents, fetchIncidentsForPoints } from '../adapters/dynamodb';
 import { SageMakerMlRiskProvider } from '../adapters/sagemaker';
 import { getHotspots } from '../utils/hotspotCache';
 import { scoreSegment } from '../engine/segmentScorer';
@@ -111,23 +111,15 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         { lat: midLat, lon: midLon },
       ];
 
-      const [weatherRes, incidentsLists, hotspotsRes] = await Promise.all([
+      const [weatherRes, incidentsRes, hotspotsRes] = await Promise.all([
         fetchWeather(midLat, midLon, departureTime),
-        Promise.all(samplePoints.map(p => fetchNearbyIncidents(p.lat, p.lon))),
+        fetchIncidentsForPoints(samplePoints),
         getHotspots(),
       ]);
 
       weather = weatherRes;
+      incidents = incidentsRes;
       hotspots = hotspotsRes;
-
-      // Merge and deduplicate incidents across all sampled points
-      const incidentMap = new Map<string, ActiveIncident>();
-      for (const list of incidentsLists) {
-        for (const inc of list) {
-          incidentMap.set(inc.incidentId, inc);
-        }
-      }
-      incidents = Array.from(incidentMap.values());
     }
 
     // ---- Score each route ----
