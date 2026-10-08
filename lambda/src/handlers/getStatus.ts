@@ -1,11 +1,13 @@
 /**
- * GET /status?lat=&lon=
+ * GET /status?lat=&lon= — Day 2 REAL implementation
  *
- * Returns area-level weather and incident summary.
- * Day 1: stub. Day 2: live Open-Meteo and DynamoDB reads.
+ * Returns live weather snapshot + incident count for the area.
  */
 import { APIGatewayProxyHandlerV2 } from 'aws-lambda';
 import { AreaStatusResponse, isInsidePilotZone, PILOT_BBOX } from '@heatflood/shared';
+import { fetchWeather } from '../adapters/openMeteo';
+import { fetchNearbyIncidents } from '../adapters/dynamodb';
+import { fetchAllHotspots } from '../adapters/dynamodb';
 import { logger } from '../utils/logger';
 
 export const handler: APIGatewayProxyHandlerV2 = async (event) => {
@@ -13,28 +15,31 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
   const lon = parseFloat(event.queryStringParameters?.lon ?? '');
 
   if (isNaN(lat) || isNaN(lon)) {
-    return {
-      statusCode: 400,
-      body: JSON.stringify({ error: 'MISSING_COORDINATES' }),
-    };
+    return { statusCode: 400, body: JSON.stringify({ error: 'MISSING_COORDINATES' }) };
   }
 
   const inside = isInsidePilotZone(lat, lon, PILOT_BBOX);
-  logger.info('getStatus called', { lat, lon, inside });
+  logger.info('getStatus called', { lat: lat.toFixed(4), lon: lon.toFixed(4), inside });
+
+  const [weather, incidents, hotspots] = await Promise.all([
+    fetchWeather(lat, lon, new Date()),
+    fetchNearbyIncidents(lat, lon),
+    fetchAllHotspots(),
+  ]);
 
   const response: AreaStatusResponse = {
     lat,
     lon,
     fetchedAt: new Date().toISOString(),
     weather: {
-      apparentTemperatureC: null,
-      relativeHumidityPct: null,
-      precipitationMm: null,
-      forecastHour: null,
-      isStale: false,
+      apparentTemperatureC: weather.apparentTemperatureC,
+      relativeHumidityPct: weather.relativeHumidityPct,
+      precipitationMm: weather.precipitationMm,
+      forecastHour: weather.forecastHourUtc,
+      isStale: weather.isStale,
     },
-    activeIncidentCount: 0,
-    hotspotCount: 0,
+    activeIncidentCount: incidents.length,
+    hotspotCount: hotspots.length,
     pilotZoneStatus: inside ? 'inside' : 'outside',
   };
 
