@@ -71,9 +71,7 @@ export function rankRoutes(rawRoutes: RawRoute[]): {
 
     for (let i = 0; i < n; i++) {
       const s = segs[i];
-      const { lon: lon1, lat: lat1 } = s.startCoord;
-      const { lon: lon2, lat: lat2 } = s.endCoord;
-      const w = Math.sqrt((lon2 - lon1) ** 2 + (lat2 - lat1) ** 2);
+      const w = s.segmentLengthM;
 
       floodRisks[i] = s.floodRisk;
       heatRisks[i] = s.heatRisk;
