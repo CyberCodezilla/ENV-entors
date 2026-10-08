@@ -1,23 +1,23 @@
 /**
- * Map — Day 3: Mapbox GL map with:
- *  - Coloured route LineLayer overlays (flood risk colour)
- *  - Selected route highlight
- *  - Incident markers (with type + status icons)
- *  - Hotspot circle overlays
- *  - Click-to-report incident modal trigger
- *  - Viewport bbox emitter for live incident fetch
+ * Map — Day 4 update:
+ *   + Segment-level hover tooltip
+ *   + MapLegend overlay
+ *   + Segment GeoJSON source per route for hover events
+ *   + Selected route fly-to on route change
  */
 'use client';
 
 import { useEffect, useRef, useCallback, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
-import type { RouteResult } from '@heatflood/shared';
+import type { RouteResult, SegmentAssessment } from '@heatflood/shared';
 import { mapboxRouteColor } from '@/lib/riskColors';
+import { MapTooltip } from './MapTooltip';
+import { MapLegend } from './MapLegend';
 
 mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? '';
 
-const PILOT_CENTER: [number, number] = [72.8477, 19.1197]; // [lon, lat]
+const PILOT_CENTER: [number, number] = [72.8477, 19.1197];
 const PILOT_ZOOM = 13.5;
 
 export interface MapIncident {
@@ -28,6 +28,23 @@ export interface MapIncident {
   status: string;
   depthCategory: string;
   observedAt: string;
+}
+
+interface TooltipState {
+  segment: {
+    floodScore: number;
+    heatScore: number;
+    confidenceScore: number;
+    floodLevel: string;
+    heatLevel: string;
+    confidenceLevel: string;
+    hardBlock: boolean;
+    hardBlockReason: string | null;
+    segmentLengthM: number;
+    reasons: string[];
+  };
+  x: number;
+  y: number;
 }
 
 interface Props {
@@ -51,8 +68,9 @@ export function Map({ routes, selectedRouteId, incidents, onBboxChange, onReques
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const markersRef = useRef<mapboxgl.Marker[]>([]);
   const [ready, setReady] = useState(false);
+  const [tooltip, setTooltip] = useState<TooltipState | null>(null);
 
-  // ---- Initialise map ----
+  // ---- Init map ----
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
@@ -61,58 +79,34 @@ export function Map({ routes, selectedRouteId, incidents, onBboxChange, onReques
       style: 'mapbox://styles/mapbox/dark-v11',
       center: PILOT_CENTER,
       zoom: PILOT_ZOOM,
-      attributionControl: true,
     });
 
     map.addControl(new mapboxgl.NavigationControl(), 'top-right');
-    map.addControl(new mapboxgl.GeolocateControl({
-      positionOptions: { enableHighAccuracy: true },
-      trackUserLocation: true,
-    }), 'top-right');
+    map.addControl(new mapboxgl.GeolocateControl({ positionOptions: { enableHighAccuracy: true }, trackUserLocation: true }), 'top-right');
 
     map.on('load', () => {
       setReady(true);
-
-      // Pilot zone boundary (soft visual)
+      // Pilot zone
       map.addSource('pilot-zone', {
         type: 'geojson',
         data: {
           type: 'Feature',
           geometry: {
             type: 'Polygon',
-            coordinates: [[
-              [72.79, 19.09], [72.90, 19.09],
-              [72.90, 19.15], [72.79, 19.15], [72.79, 19.09],
-            ]],
+            coordinates: [[[72.79, 19.09], [72.90, 19.09], [72.90, 19.15], [72.79, 19.15], [72.79, 19.09]]],
           },
           properties: {},
         },
       });
-      map.addLayer({
-        id: 'pilot-zone-fill',
-        type: 'fill',
-        source: 'pilot-zone',
-        paint: { 'fill-color': '#3b82f6', 'fill-opacity': 0.04 },
-      });
-      map.addLayer({
-        id: 'pilot-zone-line',
-        type: 'line',
-        source: 'pilot-zone',
-        paint: { 'line-color': '#3b82f6', 'line-width': 1.5, 'line-dasharray': [4, 3] },
-      });
+      map.addLayer({ id: 'pilot-zone-fill', type: 'fill', source: 'pilot-zone', paint: { 'fill-color': '#3b82f6', 'fill-opacity': 0.04 } });
+      map.addLayer({ id: 'pilot-zone-line', type: 'line', source: 'pilot-zone', paint: { 'line-color': '#3b82f6', 'line-width': 1.5, 'line-dasharray': [4, 3] } });
     });
 
-    // Click-to-report
-    map.on('click', (e) => {
-      onRequestReport?.(e.lngLat.lat, e.lngLat.lng);
-    });
+    map.on('click', (e) => { onRequestReport?.(e.lngLat.lat, e.lngLat.lng); });
 
-    // Bbox emitter
     const emitBbox = () => {
       const b = map.getBounds();
-      onBboxChange?.([
-        b.getWest(), b.getSouth(), b.getEast(), b.getNorth()
-      ]);
+      onBboxChange?.([b.getWest(), b.getSouth(), b.getEast(), b.getNorth()]);
     };
     map.on('moveend', emitBbox);
     map.on('zoomend', emitBbox);
@@ -122,50 +116,38 @@ export function Map({ routes, selectedRouteId, incidents, onBboxChange, onReques
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ---- Draw route layers ----
+  // ---- Draw routes with segment hover layers ----
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
 
-    // Clean up previous route layers + sources
+    // Cleanup
     map.getStyle()?.layers?.forEach(l => {
-      if (l.id.startsWith('route-')) map.removeLayer(l.id);
+      if (l.id.startsWith('route-') || l.id.startsWith('seg-')) map.removeLayer(l.id);
     });
     Object.keys(map.getStyle()?.sources ?? {}).forEach(s => {
-      if (s.startsWith('route-')) map.removeSource(s);
+      if (s.startsWith('route-') || s.startsWith('seg-')) map.removeSource(s);
     });
 
-    routes.forEach((route, idx) => {
+    routes.forEach((route) => {
       const isSelected = route.routeId === selectedRouteId;
       const color = mapboxRouteColor(route.overallFloodLevel, route.isHardBlocked);
-      const sourceId = `route-${route.routeId}`;
+      const srcId = `route-${route.routeId}`;
       const lineId = `route-line-${route.routeId}`;
       const casingId = `route-casing-${route.routeId}`;
 
-      map.addSource(sourceId, {
+      map.addSource(srcId, {
         type: 'geojson',
-        data: {
-          type: 'Feature',
-          geometry: route.geometry as GeoJSON.Geometry,
-          properties: { routeId: route.routeId, rank: route.rank },
-        },
+        data: { type: 'Feature', geometry: route.geometry as GeoJSON.Geometry, properties: { routeId: route.routeId } },
       });
 
-      // Casing (white outline) for selected route
       if (isSelected) {
-        map.addLayer({
-          id: casingId,
-          type: 'line',
-          source: sourceId,
+        map.addLayer({ id: casingId, type: 'line', source: srcId,
           layout: { 'line-join': 'round', 'line-cap': 'round' },
-          paint: { 'line-color': '#ffffff', 'line-width': 10, 'line-opacity': 0.6 },
-        });
+          paint: { 'line-color': '#ffffff', 'line-width': 10, 'line-opacity': 0.5 } });
       }
 
-      map.addLayer({
-        id: lineId,
-        type: 'line',
-        source: sourceId,
+      map.addLayer({ id: lineId, type: 'line', source: srcId,
         layout: { 'line-join': 'round', 'line-cap': 'round' },
         paint: {
           'line-color': color,
@@ -174,15 +156,87 @@ export function Map({ routes, selectedRouteId, incidents, onBboxChange, onReques
           ...(route.isHardBlocked ? { 'line-dasharray': [2, 2] } : {}),
         },
       });
+
+      // Per-segment hover sources (invisible wide lines for hit detection)
+      route.segments?.forEach((seg, idx) => {
+        const segSrcId = `seg-${route.routeId}-${idx}`;
+        const segHoverId = `seg-hover-${route.routeId}-${idx}`;
+
+        const segGeoJSON: GeoJSON.Feature = {
+          type: 'Feature',
+          geometry: {
+            type: 'LineString',
+            coordinates: [
+              [seg.startCoord.lon, seg.startCoord.lat],
+              [seg.endCoord.lon, seg.endCoord.lat],
+            ],
+          },
+          properties: {
+            floodScore: seg.floodRisk,
+            heatScore: seg.heatRisk,
+            confidenceScore: seg.confidence,
+            floodLevel: seg.floodRiskLevel,
+            heatLevel: seg.heatRiskLevel,
+            confidenceLevel: seg.confidenceLevel,
+            hardBlock: seg.hardBlock,
+            hardBlockReason: seg.hardBlockReason,
+            segmentLengthM: seg.segmentLengthM ?? 0,
+            reasons: JSON.stringify(seg.reasons ?? []),
+          },
+        };
+
+        map.addSource(segSrcId, { type: 'geojson', data: segGeoJSON });
+        map.addLayer({
+          id: segHoverId, type: 'line', source: segSrcId,
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: { 'line-color': '#ffffff', 'line-width': 20, 'line-opacity': 0 }, // invisible hit area
+        });
+
+        map.on('mousemove', segHoverId, (e) => {
+          const props = e.features?.[0]?.properties;
+          if (!props) return;
+          setTooltip({
+            segment: {
+              floodScore: props.floodScore,
+              heatScore: props.heatScore,
+              confidenceScore: props.confidenceScore,
+              floodLevel: props.floodLevel,
+              heatLevel: props.heatLevel,
+              confidenceLevel: props.confidenceLevel,
+              hardBlock: props.hardBlock,
+              hardBlockReason: props.hardBlockReason,
+              segmentLengthM: props.segmentLengthM,
+              reasons: JSON.parse(props.reasons ?? '[]'),
+            },
+            x: e.originalEvent.clientX,
+            y: e.originalEvent.clientY,
+          });
+          map.getCanvas().style.cursor = 'crosshair';
+        });
+        map.on('mouseleave', segHoverId, () => {
+          setTooltip(null);
+          map.getCanvas().style.cursor = '';
+        });
+      });
     });
+
+    // Fly to selected route bbox
+    const selected = routes.find(r => r.routeId === selectedRouteId);
+    if (selected?.geometry?.coordinates?.length) {
+      const coords = selected.geometry.coordinates as [number, number][];
+      const lons = coords.map(c => c[0]);
+      const lats = coords.map(c => c[1]);
+      map.fitBounds(
+        [[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]],
+        { padding: 60, maxZoom: 15, duration: 800 }
+      );
+    }
   }, [routes, selectedRouteId, ready]);
 
-  // ---- Draw incident markers ----
+  // ---- Incident markers ----
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
-
-    // Remove old markers
     markersRef.current.forEach(m => m.remove());
     markersRef.current = [];
 
@@ -192,33 +246,29 @@ export function Map({ routes, selectedRouteId, incidents, onBboxChange, onReques
 
       const el = document.createElement('div');
       el.style.cssText = [
-        'width:28px', 'height:28px',
-        'border-radius:50%',
+        'width:28px', 'height:28px', 'border-radius:50%',
         `background:${isVerified ? '#ef4444' : '#f59e0b'}`,
-        'border:2px solid #fff',
-        'display:flex', 'align-items:center', 'justify-content:center',
-        'font-size:14px', 'cursor:pointer',
+        'border:2px solid #fff', 'display:flex', 'align-items:center',
+        'justify-content:center', 'font-size:14px', 'cursor:pointer',
         'box-shadow:0 2px 6px rgba(0,0,0,0.5)',
       ].join(';');
       el.textContent = icon;
 
-      const popup = new mapboxgl.Popup({ offset: 20, closeButton: true })
-        .setHTML(`
-          <div style="color:#1f2937;font-size:13px;min-width:160px">
-            <div style="font-weight:600;margin-bottom:4px">${inc.type.replace('_', ' ')}</div>
-            <div>Depth: ${inc.depthCategory}</div>
-            <div>Status: <strong>${inc.status}</strong></div>
-            <div style="color:#6b7280;font-size:11px;margin-top:4px">
-              Observed: ${new Date(inc.observedAt).toLocaleTimeString()}
-            </div>
+      const popup = new mapboxgl.Popup({ offset: 20 }).setHTML(`
+        <div style="color:#1f2937;font-size:13px;min-width:160px">
+          <div style="font-weight:600;margin-bottom:4px">${inc.type.replace(/_/g, ' ')}</div>
+          <div>Depth: ${inc.depthCategory}</div>
+          <div>Status: <strong>${inc.status}</strong></div>
+          <div style="color:#6b7280;font-size:11px;margin-top:4px">
+            ${new Date(inc.observedAt).toLocaleTimeString()}
           </div>
-        `);
+        </div>
+      `);
 
       const marker = new mapboxgl.Marker({ element: el })
         .setLngLat([inc.longitude, inc.latitude])
         .setPopup(popup)
         .addTo(map);
-
       markersRef.current.push(marker);
     });
   }, [incidents, ready]);
@@ -231,6 +281,8 @@ export function Map({ routes, selectedRouteId, incidents, onBboxChange, onReques
           Loading map\u2026
         </div>
       )}
+      <MapLegend />
+      {tooltip && <MapTooltip segment={tooltip.segment} x={tooltip.x} y={tooltip.y} />}
     </div>
   );
 }
