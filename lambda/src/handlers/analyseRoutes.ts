@@ -1,5 +1,5 @@
 /**
- * POST /routes/analyse — Day 4: adds replay mode injection
+ * POST /routes/analyse
  *
  * When isReplay=true the handler:
  *   - Skips Open-Meteo call → uses _weatherOverride from body
@@ -7,6 +7,12 @@
  *   - Still calls Mapbox for real route geometry
  *   - Still calls DynamoDB for hotspots (static reference data)
  *   - Adds DEMO_SCENARIO banner info to response
+ *
+ * Perf notes (optimised):
+ *   - Math.max(...spread) replaced with reduce to prevent stack overflow
+ *     on large incident arrays (spread pushes all elements onto call stack)
+ *   - Segment arrival times pre-computed sequentially before Promise.all
+ *     fan-out, eliminating the shared mutable cumulativeSec race condition
  */
 import { APIGatewayProxyHandlerV2 } from 'aws-lambda';
 import { ZodError } from 'zod';
@@ -82,13 +88,11 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     let hotspots: FloodHotspot[];
 
     if (isReplay && body._weatherOverride) {
-      // Inject fixture data
       weather = buildReplayWeather(body._weatherOverride as Record<string, unknown>);
       incidents = (body._incidentOverrides ?? []) as ActiveIncident[];
-      hotspots = await getHotspots(); // hotspots are static — real data always
+      hotspots = await getHotspots();
       logger.info('analyseRoutes: replay mode active', { scenarioId });
     } else {
-      // Live data
       [weather, incidents, hotspots] = await Promise.all([
         fetchWeather(midLat, midLon, departureTime),
         fetchNearbyIncidents(midLat, midLon),
@@ -102,16 +106,22 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         const coords = route.geometry.coordinates;
         const segs = splitRouteIntoSegments(coords, SEGMENT_PARAMS.maxSegmentLengthM);
 
+        // Pre-compute arrival time per segment BEFORE Promise.all fan-out.
+        // Mutating a shared cumulativeSec variable inside concurrent async
+        // closures is a race condition — compute the full sequence first.
         let cumulativeSec = 0;
+        const arrivalTimes: Date[] = segs.map((seg) => {
+          const arrival = new Date(departureTime.getTime() + cumulativeSec * 1000);
+          cumulativeSec += seg.lengthM / 1.2; // ~1.2 m/s walking
+          return arrival;
+        });
+
         const segmentAssessments = await Promise.all(
           segs.map(async (seg, idx) => {
             const [sLon, sLat] = seg.startCoord;
             const [eLon, eLat] = seg.endCoord;
             const segMidLat = (sLat + eLat) / 2;
             const segMidLon = (sLon + eLon) / 2;
-
-            const arrivalUtc = new Date(departureTime.getTime() + cumulativeSec * 1000);
-            cumulativeSec += seg.lengthM / 1.2;
 
             const nearbyIncidents = incidents.filter(inc =>
               haversineDistanceM(segMidLat, segMidLon, inc.latitude, inc.longitude)
@@ -127,7 +137,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
               segmentIndex: idx,
               startCoord: { lat: sLat, lon: sLon },
               endCoord: { lat: eLat, lon: eLon },
-              estimatedArrivalUtc: arrivalUtc,
+              estimatedArrivalUtc: arrivalTimes[idx],
               segmentLengthM: seg.lengthM,
               precipitationMmPerHour: weather.precipitationMm,
               minutesSinceRainStop: null,
@@ -155,10 +165,13 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
 
     const { routes, hasConfidentRecommendation, noConfidentRouteReason } = rankRoutes(rawRoutes);
 
+    // Use reduce instead of Math.max(...spread) to avoid stack overflow
+    // when incidents array is large (spread pushes all elements onto the call stack)
     const oldestIncidentAge = incidents.length > 0
-      ? Math.max(...incidents.map(i =>
-          (now.getTime() - new Date(i.observedAt).getTime()) / 60_000
-        ))
+      ? incidents.reduce((max, i) => {
+          const age = (now.getTime() - new Date(i.observedAt).getTime()) / 60_000;
+          return age > max ? age : max;
+        }, 0)
       : null;
 
     const response: AnalyseRoutesResponse = {

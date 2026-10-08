@@ -1,5 +1,5 @@
 /**
- * Route Ranker — Day 2
+ * Route Ranker
  *
  * Applies per-segment risk scores, rolls up to route level,
  * eliminates hard-blocked routes, and ranks survivors.
@@ -10,6 +10,11 @@
  *   3. Weighted flood exposure across all segments
  *   4. Weighted heat exposure (secondary)
  *   5. ETA (final tiebreaker only)
+ *
+ * Perf notes (optimised):
+ *   - Single O(n) pass over segments for all rollup values
+ *   - Sort operates on a shallow copy so RouteResult.segments is never mutated
+ *   - topReasons deduplication uses a Set built once, no double-slice
  */
 import {
   RouteResult,
@@ -46,11 +51,15 @@ function confidenceLevelFromScore(score: number): ConfidenceLevel {
   return 'good';
 }
 
+/** Distance-weighted average — O(n), single pass. */
 function weightedAverage(values: number[], weights: number[]): number {
-  const totalWeight = weights.reduce((a, b) => a + b, 0);
-  if (totalWeight === 0) return 0;
-  const sum = values.reduce((acc, v, i) => acc + v * weights[i], 0);
-  return Math.round(sum / totalWeight);
+  let totalWeight = 0;
+  let sum = 0;
+  for (let i = 0; i < values.length; i++) {
+    totalWeight += weights[i];
+    sum += values[i] * weights[i];
+  }
+  return totalWeight === 0 ? 0 : Math.round(sum / totalWeight);
 }
 
 export function rankRoutes(rawRoutes: RawRoute[]): {
@@ -58,41 +67,63 @@ export function rankRoutes(rawRoutes: RawRoute[]): {
   hasConfidentRecommendation: boolean;
   noConfidentRouteReason: string | null;
 } {
-  // 1. Roll up segment scores to route level
   const evaluated = rawRoutes.map((raw) => {
     const segs = raw.segments;
+    const n = segs.length;
 
-    const anyHardBlock = segs.some(s => s.hardBlock);
-    const hardBlockSeg = segs.find(s => s.hardBlock);
+    // --- Single O(n) pass for all rollup values ---
+    let maxFloodRisk = 0;
+    let minConfidence = Infinity;
+    let anyHardBlock = false;
+    let hardBlockSeg: SegmentAssessment | undefined;
+    const floodRisks: number[] = new Array(n);
+    const heatRisks: number[] = new Array(n);
+    const segWeights: number[] = new Array(n);
 
-    const maxFloodRisk = Math.max(...segs.map(s => s.floodRisk));
-    const segLengths = segs.map(s => {
+    for (let i = 0; i < n; i++) {
+      const s = segs[i];
       const [lon1, lat1] = s.startCoord as unknown as [number, number];
       const [lon2, lat2] = s.endCoord as unknown as [number, number];
-      return Math.sqrt((lon2 - lon1) ** 2 + (lat2 - lat1) ** 2); // planar approx for weights
-    });
+      const w = Math.sqrt((lon2 - lon1) ** 2 + (lat2 - lat1) ** 2);
 
-    const weightedFlood = weightedAverage(segs.map(s => s.floodRisk), segLengths);
-    const weightedHeat = weightedAverage(segs.map(s => s.heatRisk), segLengths);
-    const minConfidence = Math.min(...segs.map(s => s.confidence));
+      floodRisks[i] = s.floodRisk;
+      heatRisks[i] = s.heatRisk;
+      segWeights[i] = w;
 
-    const topReasons = [
-      ...new Set(
-        segs
-          .sort((a, b) => b.floodRisk - a.floodRisk)
-          .flatMap(s => s.reasons)
-          .filter(r => !r.startsWith('No elevated'))
-          .slice(0, 3),
-      ),
-    ].slice(0, 3);
+      if (s.floodRisk > maxFloodRisk) maxFloodRisk = s.floodRisk;
+      if (s.confidence < minConfidence) minConfidence = s.confidence;
+      if (s.hardBlock && !anyHardBlock) {
+        anyHardBlock = true;
+        hardBlockSeg = s;
+      }
+    }
+    if (minConfidence === Infinity) minConfidence = 0;
+
+    const weightedFlood = weightedAverage(floodRisks, segWeights);
+    const weightedHeat = weightedAverage(heatRisks, segWeights);
+
+    // topReasons: sort a COPY so segs order is preserved in RouteResult
+    const segsCopy = segs.slice().sort((a, b) => b.floodRisk - a.floodRisk);
+    const seen = new Set<string>();
+    const topReasons: string[] = [];
+    for (const s of segsCopy) {
+      for (const r of s.reasons) {
+        if (!r.startsWith('No elevated') && !seen.has(r)) {
+          seen.add(r);
+          topReasons.push(r);
+          if (topReasons.length === 3) break;
+        }
+      }
+      if (topReasons.length === 3) break;
+    }
 
     const result: RouteResult = {
       routeId: raw.routeId,
-      rank: 0, // assigned below
+      rank: 0,
       distanceM: raw.distanceM,
       durationSec: raw.durationSec,
       geometry: raw.geometry,
-      segments: segs,
+      segments: segs,           // original order preserved
 
       maxFloodRisk,
       weightedFloodExposure: weightedFlood,
@@ -104,18 +135,18 @@ export function rankRoutes(rawRoutes: RawRoute[]): {
       isHardBlocked: anyHardBlock,
       blockReason: hardBlockSeg?.hardBlockReason ?? null,
 
-      topReasons: topReasons.length > 0 ? topReasons : ['No elevated risk signals detected from available data'],
+      topReasons: topReasons.length > 0
+        ? topReasons
+        : ['No elevated risk signals detected from available data'],
       disclaimer: ROUTE_DISCLAIMER,
     };
 
     return result;
   });
 
-  // 2. Separate blocked from viable routes
   const viableRoutes = evaluated.filter(r => !r.isHardBlocked);
   const blockedRoutes = evaluated.filter(r => r.isHardBlocked);
 
-  // 3. Sort viable routes
   viableRoutes.sort((a, b) => {
     if (a.maxFloodRisk !== b.maxFloodRisk) return a.maxFloodRisk - b.maxFloodRisk;
     if (a.weightedFloodExposure !== b.weightedFloodExposure) return a.weightedFloodExposure - b.weightedFloodExposure;
@@ -123,7 +154,6 @@ export function rankRoutes(rawRoutes: RawRoute[]): {
     return a.durationSec - b.durationSec;
   });
 
-  // 4. Assign ranks
   viableRoutes.forEach((r, i) => { r.rank = i + 1; });
   blockedRoutes.forEach((r, i) => { r.rank = viableRoutes.length + i + 1; });
 

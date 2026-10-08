@@ -1,8 +1,11 @@
 /**
- * Confidence Scoring Engine — Day 2
+ * Confidence Scoring Engine
  *
  * Answers: "How much should we trust this risk assessment?"
  * Low confidence does NOT mean low risk — communicate this in the UI.
+ *
+ * Perf notes (optimised):
+ *   - sourceReliabilityScore short-circuits before division when totalCount === 0
  */
 import {
   CONFIDENCE_WEIGHTS,
@@ -20,12 +23,12 @@ export interface ConfidenceInput {
   verifiedIncidentCount: number;
   oldestIncidentAgeMinutes: number | null;
   hotspotDataAvailable: boolean;
-  conflictingReports: boolean; // two reports within radius but contradicting severity
+  conflictingReports: boolean;
   mlAvailable: boolean;
 }
 
 export interface ConfidenceOutput {
-  score: number;          // 0–100
+  score: number;
   level: ConfidenceLevel;
   isStaleWeather: boolean;
   reasons: string[];
@@ -34,7 +37,7 @@ export interface ConfidenceOutput {
 function freshnessScore(weatherAgeMinutes: number | null, oldestIncidentAgeMinutes: number | null): number {
   let score = 100;
   if (weatherAgeMinutes === null) {
-    score -= 40; // No weather data at all
+    score -= 40;
   } else if (weatherAgeMinutes > TTL_MINUTES.weatherStale) {
     score -= 30;
   }
@@ -45,9 +48,9 @@ function freshnessScore(weatherAgeMinutes: number | null, oldestIncidentAgeMinut
 }
 
 function sourceReliabilityScore(verifiedCount: number, totalCount: number): number {
-  if (totalCount === 0) return 50; // No reports — baseline
-  const verifiedRatio = verifiedCount / totalCount;
-  return Math.round(30 + verifiedRatio * 70);
+  // Short-circuit before division — no reports means baseline, not a ratio
+  if (totalCount === 0) return 50;
+  return Math.round(30 + (verifiedCount / totalCount) * 70);
 }
 
 function spatialScore(hotspotAvailable: boolean): number {
@@ -59,7 +62,7 @@ function corroborationScore(incidentCount: number, conflicting: boolean): number
   if (incidentCount >= 3) return 100;
   if (incidentCount === 2) return 75;
   if (incidentCount === 1) return 50;
-  return 60; // No reports = uncertain but not low
+  return 60;
 }
 
 function levelFromScore(score: number): ConfidenceLevel {

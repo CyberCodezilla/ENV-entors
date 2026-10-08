@@ -1,7 +1,11 @@
 /**
- * Flood Risk Engine — Day 2
+ * Flood Risk Engine
  * Deterministic, rule-based segment flood scoring (0-100).
- * ML signal is additive overlay only (Day 5).
+ * ML signal is additive overlay only.
+ *
+ * Perf notes (optimised):
+ *   - fetchedAt timestamp hoisted outside incident loop (was new Date() per incident)
+ *   - type/sourceType display strings computed once per incident, not twice
  */
 import {
   FLOOD_SCORE_WEIGHTS,
@@ -42,7 +46,7 @@ export interface FloodHotspot {
 export interface FloodRiskInput {
   segmentId: string;
   precipitationMmPerHour: number | null;
-  minutesSinceRainStop: number | null; // null if still raining or never rained
+  minutesSinceRainStop: number | null;
   incidents: ActiveIncident[];
   hotspotDistanceM: number | null;
   hotspotOverlap: boolean;
@@ -50,7 +54,7 @@ export interface FloodRiskInput {
 }
 
 export interface FloodRiskOutput {
-  score: number;        // 0–100
+  score: number;
   level: RiskLevel;
   hardBlock: boolean;
   hardBlockReason: string | null;
@@ -63,20 +67,21 @@ export interface FloodRiskOutput {
 // ---------------------------------------------------------------------------
 
 function rainContribution(mmPerHour: number | null, minutesSinceStop: number | null): number {
-  // Still raining
   if (mmPerHour !== null && mmPerHour > 0) {
     const band = RAINFALL_BANDS.find(b => mmPerHour <= b.maxMm);
     return band?.floodContribution ?? 95;
   }
-  // Rain stopped recently — retain partial concern
   if (minutesSinceStop !== null && minutesSinceStop <= TTL_MINUTES.recentRainWindow) {
     const decay = 1 - minutesSinceStop / TTL_MINUTES.recentRainWindow;
-    return Math.round(40 * decay); // up to 40 points post-rain
+    return Math.round(40 * decay);
   }
   return 0;
 }
 
-function reportContribution(incidents: ActiveIncident[], now: Date): {
+function reportContribution(
+  incidents: ActiveIncident[],
+  now: Date,
+): {
   score: number;
   hardBlock: boolean;
   hardBlockReason: string | null;
@@ -89,25 +94,33 @@ function reportContribution(incidents: ActiveIncident[], now: Date): {
   const evidence: EvidenceItem[] = [];
   const reasons: string[] = [];
 
+  // Hoist timestamp — same value for every incident in this call
+  const fetchedAt = new Date().toISOString();
+  const nowMs = now.getTime();
+  const halfLife = REPORT_DECAY.halfLifeMinutes;
+
   for (const inc of incidents) {
     const isHardBlockSource = (HARD_BLOCK_SOURCES as readonly string[]).includes(inc.sourceType);
     const isHardBlockType = (HARD_BLOCK_TYPES as readonly string[]).includes(inc.type);
     const isVerified = inc.status === 'verified' || inc.status === 'corroborated';
 
-    const observedMs = new Date(inc.observedAt).getTime();
-    const ageMinutes = (now.getTime() - observedMs) / 60_000;
+    // Hoist display strings — each replace allocates a new string
+    const typeDisplay = inc.type.replace('_', ' ');
+    const sourceDisplay = inc.sourceType.replace(/_/g, ' ');
+    const demoTag = inc.isDemo ? ' [DEMO]' : '';
 
-    // Hard block check
+    const ageMinutes = (nowMs - new Date(inc.observedAt).getTime()) / 60_000;
+
     if ((isHardBlockSource || isHardBlockType) && isVerified) {
       hardBlock = true;
-      hardBlockReason = `Verified ${inc.type.replace('_', ' ')} from ${inc.sourceType.replace(/_/g, ' ')}${inc.isDemo ? ' [DEMO]' : ''}`;
+      hardBlockReason = `Verified ${typeDisplay} from ${sourceDisplay}${demoTag}`;
       score = 100;
       reasons.push(`HARD BLOCK: ${hardBlockReason}`);
       evidence.push({
         sourceType: inc.sourceType as EvidenceItem['sourceType'],
         description: `${inc.type} — ${inc.status}`,
         observedAt: inc.observedAt,
-        fetchedAt: new Date().toISOString(),
+        fetchedAt,
         distanceM: null,
         verificationStatus: inc.status as EvidenceItem['verificationStatus'],
         isVerified: true,
@@ -116,8 +129,6 @@ function reportContribution(incidents: ActiveIncident[], now: Date): {
       continue;
     }
 
-    // Time-decayed report contribution
-    const halfLife = REPORT_DECAY.halfLifeMinutes;
     const decayFactor = Math.max(
       REPORT_DECAY.minimumWeight,
       Math.pow(0.5, ageMinutes / halfLife),
@@ -127,7 +138,6 @@ function reportContribution(incidents: ActiveIncident[], now: Date): {
     if (isVerified) baseScore = 70;
     else if (inc.status === 'pending') baseScore = 35;
 
-    // Depth bonus
     if (inc.depthCategory === 'knee') baseScore = Math.min(100, baseScore + 15);
     if (inc.depthCategory === 'vehicle_impassable') baseScore = Math.min(100, baseScore + 25);
 
@@ -135,13 +145,13 @@ function reportContribution(incidents: ActiveIncident[], now: Date): {
     score = Math.min(100, score + contribution);
 
     reasons.push(
-      `${inc.status} ${inc.type.replace('_', ' ')} report (${Math.round(ageMinutes)} min ago, depth: ${inc.depthCategory})${inc.isDemo ? ' [DEMO]' : ''}`
+      `${inc.status} ${typeDisplay} report (${Math.round(ageMinutes)} min ago, depth: ${inc.depthCategory})${demoTag}`
     );
     evidence.push({
       sourceType: inc.sourceType as EvidenceItem['sourceType'],
       description: `${inc.type} — ${inc.status}`,
       observedAt: inc.observedAt,
-      fetchedAt: new Date().toISOString(),
+      fetchedAt,
       distanceM: null,
       verificationStatus: inc.status as EvidenceItem['verificationStatus'],
       isVerified,
@@ -191,7 +201,6 @@ export function calculateFloodRisk(input: FloodRiskInput): FloodRiskOutput {
     };
   }
 
-  // Weighted combination
   const weightedScore = Math.min(
     100,
     Math.round(
