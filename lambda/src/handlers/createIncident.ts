@@ -1,13 +1,20 @@
 /**
- * POST /incidents — Day 3 REAL implementation
+ * POST /incidents
  *
  * Pipeline:
  *   1. Validate request (Zod)
- *   2. Idempotency check via idempotencyKey (DynamoDB conditional write)
- *   3. Per-IP rate limiting (simple counter in DynamoDB)
- *   4. Persist incident with TTL epoch
- *   5. Check corroboration with nearby recent reports
- *   6. Return typed response
+ *   2. Per-IP rate limiting (DynamoDB GSI counter)
+ *   3. Persist incident with TTL epoch
+ *   4. Check corroboration with nearby recent reports
+ *   5. Return typed response
+ *
+ * Fix notes (optimised):
+ *   - checkRateLimit previously queried incidentId (PK) with a prefix string
+ *     — PK equality never matches a prefix, count was always 0, rate limit
+ *     never fired. Fixed: use geohash GSI (geohash='ratelimit') and filter
+ *     on incidentId begins_with the IP+bucket prefix.
+ *   - encodeGeohash now always called with explicit precision=5 (consistent
+ *     with dynamodb.ts; guards against default changing).
  */
 import { APIGatewayProxyHandlerV2 } from 'aws-lambda';
 import { ZodError } from 'zod';
@@ -31,30 +38,45 @@ import { logger } from '../utils/logger';
 
 const client = new DynamoDBClient({ region: process.env.AWS_REGION ?? 'ap-south-1' });
 const INCIDENTS_TABLE = process.env.INCIDENTS_TABLE ?? 'heatflood-incidents';
-const RATE_TABLE = process.env.INCIDENTS_TABLE ?? 'heatflood-incidents'; // reuse same table with pk prefix
 const RATE_LIMIT_PER_HOUR = 5;
 
+/**
+ * Per-IP hourly rate limiter.
+ *
+ * Rate-limit records live in the same incidents table under:
+ *   geohash  = 'ratelimit'           (GSI partition key)
+ *   incidentId = 'ratelimit#<IP>#<YYYY-MM-DDTHH>#<uuid>'  (table PK)
+ *
+ * We query the GSI for all records whose incidentId begins_with
+ * 'ratelimit#<IP>#<bucket>' to count how many exist for this IP+hour.
+ */
 async function checkRateLimit(clientIp: string, now: Date): Promise<boolean> {
-  // Simple hourly bucket: key = ratelimit#IP#YYYY-MM-DDTHH
   const hourBucket = now.toISOString().slice(0, 13); // "2026-07-18T09"
-  const ratePk = `ratelimit#${clientIp}#${hourBucket}`;
+  const prefix = `ratelimit#${clientIp}#${hourBucket}`;
   const windowExpiry = Math.floor(now.getTime() / 1000) + 3600;
 
   try {
-    // Atomic increment — if count exceeds limit the put fails
+    // Query via geohash GSI — all ratelimit records share geohash='ratelimit'
+    // Filter down to this IP+hour bucket via begins_with on incidentId
     const result = await client.send(new QueryCommand({
       TableName: INCIDENTS_TABLE,
-      KeyConditionExpression: 'incidentId = :pk',
-      ExpressionAttributeValues: { ':pk': { S: ratePk } },
+      IndexName: 'geohash-createdAt-index',
+      KeyConditionExpression: 'geohash = :gh',
+      FilterExpression: 'begins_with(incidentId, :prefix)',
+      ExpressionAttributeValues: {
+        ':gh': { S: 'ratelimit' },
+        ':prefix': { S: prefix },
+      },
     }));
+
     const count = result.Items?.length ?? 0;
     if (count >= RATE_LIMIT_PER_HOUR) return false;
 
-    // Write a counter record (TTL = end of hour window)
+    // Write a new counter record (TTL = end of hour window)
     await client.send(new PutItemCommand({
       TableName: INCIDENTS_TABLE,
       Item: marshall({
-        incidentId: `${ratePk}#${uuidv4()}`,
+        incidentId: `${prefix}#${uuidv4()}`,
         geohash: 'ratelimit',
         createdAt: now.toISOString(),
         expiresAt: new Date(windowExpiry * 1000).toISOString(),
@@ -68,14 +90,14 @@ async function checkRateLimit(clientIp: string, now: Date): Promise<boolean> {
     }));
     return true;
   } catch {
-    return true; // fail open — don't block legitimate reports on DynamoDB hiccup
+    return true; // fail open — don’t block legitimate reports on DynamoDB hiccup
   }
 }
 
 async function findCorroborating(
   lat: number, lon: number, type: string, now: Date
 ): Promise<number> {
-  const geohash = encodeGeohash(lat, lon, 5);
+  const geohash = encodeGeohash(lat, lon, 5); // explicit precision
   const windowStart = new Date(now.getTime() - TTL_MINUTES.corroboratedReport * 60_000).toISOString();
 
   try {
@@ -113,7 +135,6 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     const body = JSON.parse(event.body ?? '{}');
     const req = CreateIncidentRequestSchema.parse(body);
 
-    // Rate limit
     const allowed = await checkRateLimit(clientIp, now);
     if (!allowed) {
       return {
@@ -126,11 +147,9 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
       };
     }
 
-    // Expiry
     const expiresAt = new Date(now.getTime() + TTL_MINUTES.unverifiedReport * 60_000);
     const ttlEpoch = Math.floor(expiresAt.getTime() / 1000);
 
-    // Corroboration check
     const corroborating = await findCorroborating(req.latitude, req.longitude, req.type, now);
     const status = corroborating >= 2 ? 'corroborated' : 'pending';
     const effectiveExpiry = status === 'corroborated'
@@ -141,7 +160,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
       incidentId: uuidv4(),
       latitude: req.latitude,
       longitude: req.longitude,
-      geohash: encodeGeohash(req.latitude, req.longitude),
+      geohash: encodeGeohash(req.latitude, req.longitude, 5), // explicit precision
       type: req.type,
       depthCategory: req.depthCategory ?? 'unknown',
       observedAt: req.observedAt,
@@ -154,7 +173,6 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
       ttlEpoch,
     };
 
-    // Idempotent write — condition: incidentId must not already exist
     try {
       await client.send(new PutItemCommand({
         TableName: INCIDENTS_TABLE,
@@ -163,7 +181,6 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
       }));
     } catch (err) {
       if (err instanceof ConditionalCheckFailedException) {
-        // Duplicate idempotency key — return 200 with same structure
         return {
           statusCode: 200,
           headers: { 'Content-Type': 'application/json' },

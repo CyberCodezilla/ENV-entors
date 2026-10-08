@@ -1,13 +1,19 @@
 /**
- * DynamoDB Adapter — Day 2
+ * DynamoDB Adapter
  *
  * Reads incidents and hotspots from DynamoDB.
  * Uses the geohash GSI to narrow the scan to nearby cells.
  *
- * Day 1–2: direct SDK calls.
- * Day 3: add write path (createIncident handler replaces stub).
+ * Perf note (optimised):
+ *   - ScanCommand moved to static top-level import (was dynamic await import()
+ *     inside fetchAllHotspots, re-evaluated on every warm Lambda invocation)
  */
-import { DynamoDBClient, QueryCommand, GetItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  DynamoDBClient,
+  QueryCommand,
+  GetItemCommand,
+  ScanCommand,
+} from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { encodeGeohash, PILOT_BBOX } from '@heatflood/shared';
 import { ActiveIncident, FloodHotspot } from '../engine/floodRisk';
@@ -30,7 +36,6 @@ export async function fetchNearbyIncidents(
 
   const incidents: ActiveIncident[] = [];
 
-  // Query the centre geohash cell (neighbours omitted in MVP for brevity)
   try {
     const result = await client.send(new QueryCommand({
       TableName: INCIDENTS_TABLE,
@@ -57,13 +62,11 @@ export async function fetchNearbyIncidents(
 
 /**
  * Fetch all hotspots from the static hotspots table (small, full-scan acceptable).
- * In production: cache this in Lambda memory between invocations.
+ * Cached in Lambda memory between invocations via hotspotCache.ts.
  */
 export async function fetchAllHotspots(): Promise<FloodHotspot[]> {
   const hotspots: FloodHotspot[] = [];
   try {
-    // Hotspot table is small (~dozens of rows) — full scan is acceptable
-    const { ScanCommand } = await import('@aws-sdk/client-dynamodb');
     const result = await client.send(new ScanCommand({ TableName: HOTSPOTS_TABLE }));
     for (const item of result.Items ?? []) {
       hotspots.push(unmarshall(item) as FloodHotspot);

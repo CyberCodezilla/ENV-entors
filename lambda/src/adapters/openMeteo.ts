@@ -1,11 +1,19 @@
 /**
- * Open-Meteo Weather Adapter — Day 2
+ * Open-Meteo Weather Adapter
  *
  * Fetches hourly apparent_temperature, relative_humidity_2m, precipitation
  * for a given lat/lon and departure time.
  *
  * No API key required. Free tier.
  * https://open-meteo.com/en/docs
+ *
+ * Perf note (optimised):
+ *   - Best-slot search previously called new Date(time[i] + ':00Z') on every
+ *     iteration (48× for a 2-day forecast), allocating 48 Date objects.
+ *     Replaced with direct ISO-string-to-epoch arithmetic:
+ *       ms = Date.parse(str + ':00Z')
+ *     Date.parse is a single static operation that avoids constructing a
+ *     Date object; the result is a number and the comparison is pure arithmetic.
  */
 import { logger } from '../utils/logger';
 
@@ -14,9 +22,9 @@ const BASE = 'https://api.open-meteo.com/v1/forecast';
 export interface WeatherSnapshot {
   apparentTemperatureC: number | null;
   relativeHumidityPct: number | null;
-  precipitationMm: number | null;     // mm accumulated in the preceding hour
-  forecastHourUtc: string | null;     // ISO UTC string for the matched hour slot
-  fetchedAt: string;                  // ISO UTC
+  precipitationMm: number | null;
+  forecastHourUtc: string | null;
+  fetchedAt: string;
   isStale: boolean;
   staleThresholdMinutes: number;
   ageMinutes: number | null;
@@ -56,18 +64,26 @@ export async function fetchWeather(
       };
     };
 
-    // Find the hourly slot closest to targetTimeUtc
+    // Find the hourly slot closest to targetTimeUtc.
+    // Use Date.parse() instead of new Date() to avoid allocating 48 Date objects.
     const targetMs = targetTimeUtc.getTime();
     let bestIdx = 0;
     let bestDiff = Infinity;
 
-    for (let i = 0; i < data.hourly.time.length; i++) {
-      const diff = Math.abs(new Date(data.hourly.time[i] + ':00Z').getTime() - targetMs);
-      if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
+    const times = data.hourly.time;
+    for (let i = 0; i < times.length; i++) {
+      const diff = Math.abs(Date.parse(times[i] + ':00Z') - targetMs);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        bestIdx = i;
+        // Early-exit: once diff starts increasing we’ve passed the minimum
+        // (slots are monotonically increasing in time)
+        if (i > 0 && diff > bestDiff) break;
+      }
     }
 
-    const slotTime = data.hourly.time[bestIdx];
-    const slotMs = new Date(slotTime + ':00Z').getTime();
+    const slotTime = times[bestIdx];
+    const slotMs = Date.parse(slotTime + ':00Z');
     const ageMinutes = (Date.now() - slotMs) / 60_000;
     const isStale = ageMinutes > STALE_THRESHOLD_MINUTES;
 

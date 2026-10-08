@@ -1,6 +1,12 @@
 /**
- * Heat Risk Engine — Day 2
+ * Heat Risk Engine
  * Scores heat exposure for a route segment based on weather + travel context.
+ *
+ * Perf/fix notes (optimised):
+ *   - departureHourContribution: fixed || → && in range guards (was always-true,
+ *     dead-coding the baseline return 10 branch)
+ *   - HEAT_BANDS.find() called once per calculateHeatRisk; label threaded
+ *     through so the reasons block doesn’t repeat the O(n) scan
  */
 import {
   HEAT_SCORE_WEIGHTS,
@@ -27,19 +33,32 @@ export interface HeatRiskOutput {
   reasons: string[];
 }
 
-function tempContribution(apparentTempC: number | null): number {
-  if (apparentTempC === null) return 0;
+type HeatBand = typeof HEAT_BANDS[number];
+
+/**
+ * Returns both the numeric contribution and the matched band so callers
+ * don’t need to repeat the find() for label extraction.
+ */
+function tempContributionWithBand(
+  apparentTempC: number | null,
+): { contribution: number; band: HeatBand | undefined } {
+  if (apparentTempC === null) return { contribution: 0, band: undefined };
   const band = HEAT_BANDS.find(b => apparentTempC <= b.maxC);
-  return band?.heatContribution ?? 95;
+  return { contribution: band?.heatContribution ?? 95, band };
 }
 
 function departureHourContribution(arrivalUtc: Date): number {
   // Convert UTC to IST (UTC+5:30)
-  const istHour = (arrivalUtc.getUTCHours() + 5 + Math.floor((arrivalUtc.getUTCMinutes() + 30) / 60)) % 24;
-  // Peak heat: 11–16 IST
+  const totalMinutesUtc = arrivalUtc.getUTCHours() * 60 + arrivalUtc.getUTCMinutes();
+  const istMinutes = totalMinutesUtc + 330; // +5h30m
+  const istHour = Math.floor((istMinutes % 1440) / 60); // wrap at 24h
+
+  // Peak heat window: 11–16 IST
   if (istHour >= 11 && istHour <= 16) return 100;
-  if (istHour >= 10 || istHour <= 17) return 60;
-  if (istHour >= 9 || istHour <= 18) return 30;
+  // Warm shoulder: 10–17 IST (&&, not ||)
+  if (istHour >= 10 && istHour <= 17) return 60;
+  // Early/late: 9–18 IST (&&, not ||)
+  if (istHour >= 9 && istHour <= 18) return 30;
   return 10;
 }
 
@@ -62,7 +81,8 @@ function scoreToLevel(score: number): RiskLevel {
 export function calculateHeatRisk(input: HeatRiskInput): HeatRiskOutput {
   const { apparentTemperatureC, estimatedArrivalUtc, segmentWalkDurationSec, heatSensitive, mode } = input;
 
-  const tempScore = tempContribution(apparentTemperatureC);
+  // Single HEAT_BANDS.find() — contribution + label in one pass
+  const { contribution: tempScore, band } = tempContributionWithBand(apparentTemperatureC);
   const hourScore = departureHourContribution(estimatedArrivalUtc);
   const walkScore = walkDurationContribution(segmentWalkDurationSec, mode);
   const sensitivityMultiplier = heatSensitive ? 1.15 : 1.0;
@@ -79,7 +99,7 @@ export function calculateHeatRisk(input: HeatRiskInput): HeatRiskOutput {
   if (apparentTemperatureC === null) {
     reasons.push('Apparent temperature unavailable — heat risk estimated from time of day only');
   } else {
-    const band = HEAT_BANDS.find(b => apparentTemperatureC <= b.maxC);
+    // Reuse band found above — no second find()
     reasons.push(`Apparent temperature ${apparentTemperatureC.toFixed(1)} °C (${band?.label ?? 'unknown'} band)`);
   }
   if (mode === 'walking' && segmentWalkDurationSec > 900) {
