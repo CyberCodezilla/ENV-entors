@@ -16,39 +16,66 @@ def make_samples(weather: pd.DataFrame, hotspots: list[dict]) -> pd.DataFrame:
     lat_grid = np.arange(19.09, 19.15 + 1e-9, 0.005)
     lon_grid = np.arange(72.81, 72.88 + 1e-9, 0.005)
     
-    grid_points = []
+    grid_lats = []
+    grid_lons = []
+    is_hotspots = []
+    dist_m = []
+    overlaps = []
     for lat in lat_grid:
         for lon in lon_grid:
             ds = [6371.0088*2*math.asin(math.sqrt(math.sin(math.radians((lat-a)/2))**2 + math.cos(math.radians(lat))*math.cos(math.radians(a))*math.sin(math.radians((lon-b)/2))**2)) for a,b in hot]
             dmin = min(ds) if ds else 999.0
-            grid_points.append({
-                "lat": lat,
-                "lon": lon,
-                "is_hotspot": dmin <= 0.35,
-                "distance_hotspot_m": dmin * 1000,
-                "hotspot_overlap": int(dmin <= 0.25),
-            })
+            grid_lats.append(lat)
+            grid_lons.append(lon)
+            is_hotspots.append(dmin <= 0.35)
+            dist_m.append(dmin * 1000)
+            overlaps.append(int(dmin <= 0.25))
 
-    rows = []
-    # Fixed pilot grid. Historical NASA POWER weather is sampled at the pilot centroid; spatial variation comes from hotspot proximity.
-    for _, w in weather.iterrows():
-        is_rainy = (w.rain_1h_mm >= 10.0 or w.rain_3h_mm >= 25.0)
-        is_extreme_rain = w.rain_1h_mm >= 35.0
-        ts_str = w.timestamp.isoformat()
-        
-        for pt in grid_points:
-            label = int((pt["is_hotspot"] and is_rainy) or is_extreme_rain)
-            rows.append({
-                "timestamp": ts_str, "lat": pt["lat"], "lon": pt["lon"],
-                "rain_1h_mm": w.rain_1h_mm, "rain_3h_mm": w.rain_3h_mm, "rain_forecast_1h_mm": 0.0,
-                "relative_humidity_pct": w.relative_humidity_pct, "apparent_temperature_c": w.apparent_temperature_c,
-                "distance_hotspot_m": pt["distance_hotspot_m"], "hotspot_overlap": pt["hotspot_overlap"],
-                "recent_report_count": 0, "verified_report_count": 0, "newest_report_age_min": -1.0,
-                "hour_sin": w.hour_sin, "hour_cos": w.hour_cos, "dow_sin": w.dow_sin, "dow_cos": w.dow_cos,
-                "month_sin": w.month_sin, "month_cos": w.month_cos,
-                "label": label
-            })
-    return pd.DataFrame(rows)
+    num_w = len(weather)
+    num_g = len(grid_lats)
+    total_n = num_w * num_g
+
+    # Pre-allocate contiguous numpy arrays for minimal memory overhead (< 60MB RAM)
+    lats = np.tile(grid_lats, num_w)
+    lons = np.tile(grid_lons, num_w)
+    rain_1h = np.repeat(weather.rain_1h_mm.to_numpy(), num_g)
+    rain_3h = np.repeat(weather.rain_3h_mm.to_numpy(), num_g)
+    rain_fc_1h = np.zeros(total_n, dtype=np.float64)
+    rel_hum = np.repeat(weather.relative_humidity_pct.to_numpy(), num_g)
+    app_temp = np.repeat(weather.apparent_temperature_c.to_numpy(), num_g)
+    distance_hotspot_m = np.tile(dist_m, num_w)
+    hotspot_overlap = np.tile(overlaps, num_w)
+    recent_report_count = np.zeros(total_n, dtype=np.int32)
+    verified_report_count = np.zeros(total_n, dtype=np.int32)
+    newest_report_age_min = np.full(total_n, -1.0, dtype=np.float64)
+    hour_sin = np.repeat(weather.hour_sin.to_numpy(), num_g)
+    hour_cos = np.repeat(weather.hour_cos.to_numpy(), num_g)
+    dow_sin = np.repeat(weather.dow_sin.to_numpy(), num_g)
+    dow_cos = np.repeat(weather.dow_cos.to_numpy(), num_g)
+    month_sin = np.repeat(weather.month_sin.to_numpy(), num_g)
+    month_cos = np.repeat(weather.month_cos.to_numpy(), num_g)
+
+    # Vectorized label computation
+    is_hotspot_arr = np.tile(is_hotspots, num_w)
+    is_rainy_arr = np.repeat((weather.rain_1h_mm >= 10.0) | (weather.rain_3h_mm >= 25.0), num_g)
+    is_extreme_rain_arr = np.repeat(weather.rain_1h_mm >= 35.0, num_g)
+    labels = ((is_hotspot_arr & is_rainy_arr) | is_extreme_rain_arr).astype(np.int32)
+
+    # Vectorized timestamps
+    ts_strings = np.array([ts.isoformat() for ts in weather.timestamp], dtype=object)
+    timestamps = np.repeat(ts_strings, num_g)
+
+    return pd.DataFrame({
+        "timestamp": timestamps, "lat": lats, "lon": lons,
+        "rain_1h_mm": rain_1h, "rain_3h_mm": rain_3h, "rain_forecast_1h_mm": rain_fc_1h,
+        "relative_humidity_pct": rel_hum, "apparent_temperature_c": app_temp,
+        "distance_hotspot_m": distance_hotspot_m, "hotspot_overlap": hotspot_overlap,
+        "recent_report_count": recent_report_count, "verified_report_count": verified_report_count,
+        "newest_report_age_min": newest_report_age_min,
+        "hour_sin": hour_sin, "hour_cos": hour_cos, "dow_sin": dow_sin, "dow_cos": dow_cos,
+        "month_sin": month_sin, "month_cos": month_cos,
+        "label": labels
+    })
 
 
 def main():
