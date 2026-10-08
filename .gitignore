@@ -47,3 +47,8 @@ playwright-report/
 
 # Data files with personal or sensitive content
 data/private/
+ml/.venv/
+ml/data/model/
+ml/data/mumbai_weather.csv
+ml/src/__pycache__/
+ml/__pycache__/
