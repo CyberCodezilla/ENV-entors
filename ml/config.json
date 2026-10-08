@@ -1,0 +1,9 @@
+{
+  "pilot": {"lat_min": 19.10, "lat_max": 19.145, "lon_min": 72.82, "lon_max": 72.87},
+  "target": "waterlogging_susceptibility",
+  "label_definition": "Documented Mumbai waterlogging hotspot presence; NOT a time-specific observed street-flood label",
+  "seed": 42,
+  "test_size_time": 0.2,
+  "validation_size_time": 0.15,
+  "model": {"objective": "binary:logistic", "eval_metric": "aucpr", "tree_method": "hist", "n_estimators": 500, "learning_rate": 0.04, "max_depth": 6, "min_child_weight": 4, "subsample": 0.85, "colsample_bytree": 0.85, "reg_alpha": 0.2, "reg_lambda": 2.0, "early_stopping_rounds": 40}
+}
