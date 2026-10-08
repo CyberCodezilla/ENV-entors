@@ -1,147 +1,41 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: HeatFlood Guardian — SAM infrastructure
+Description: HeatFlood Guardian — SAM template (Day 3)
 
 Globals:
   Function:
-    Runtime: nodejs20.x
     Timeout: 15
     MemorySize: 256
+    Runtime: nodejs20.x
+    Architectures: [arm64]
     Environment:
       Variables:
+        AWS_NODEJS_CONNECTION_REUSE_ENABLED: '1'
         INCIDENTS_TABLE: !Ref IncidentsTable
         HOTSPOTS_TABLE: !Ref HotspotsTable
-        SERVICE_VERSION: '0.1.0'
-        SAGEMAKER_ENABLED: 'false'
-        SAGEMAKER_ENDPOINT_NAME: ''
         MAPBOX_TOKEN: !Sub '{{resolve:ssm:/heatflood/mapbox-token}}'
-    Tracing: Active
+
+Parameters:
+  Stage:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, prod]
 
 Resources:
 
-  # -----------------------------------------------------------------------
-  # API Gateway HTTP API
-  # -----------------------------------------------------------------------
-  HeatFloodApi:
-    Type: AWS::Serverless::HttpApi
-    Properties:
-      StageName: prod
-      CorsConfiguration:
-        AllowOrigins:
-          - '*'
-        AllowMethods:
-          - GET
-          - POST
-          - PATCH
-          - OPTIONS
-        AllowHeaders:
-          - Content-Type
-          - Authorization
+  # ------------------------------------------------------------------ #
+  # DynamoDB Tables
+  # ------------------------------------------------------------------ #
 
-  # -----------------------------------------------------------------------
-  # Lambda functions
-  # -----------------------------------------------------------------------
-  HealthFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: dist/health.handler
-      CodeUri: ../lambda
-      Events:
-        HealthGet:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HeatFloodApi
-            Path: /health
-            Method: GET
-
-  AnalyseRoutesFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: dist/analyseRoutes.handler
-      CodeUri: ../lambda
-      Timeout: 20
-      Events:
-        AnalysePost:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HeatFloodApi
-            Path: /routes/analyse
-            Method: POST
-      Policies:
-        - DynamoDBReadPolicy:
-            TableName: !Ref IncidentsTable
-        - DynamoDBReadPolicy:
-            TableName: !Ref HotspotsTable
-
-  GetStatusFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: dist/getStatus.handler
-      CodeUri: ../lambda
-      Events:
-        StatusGet:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HeatFloodApi
-            Path: /status
-            Method: GET
-      Policies:
-        - DynamoDBReadPolicy:
-            TableName: !Ref IncidentsTable
-
-  CreateIncidentFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: dist/createIncident.handler
-      CodeUri: ../lambda
-      Events:
-        IncidentPost:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HeatFloodApi
-            Path: /incidents
-            Method: POST
-      Policies:
-        - DynamoDBCrudPolicy:
-            TableName: !Ref IncidentsTable
-
-  ListIncidentsFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: dist/listIncidents.handler
-      CodeUri: ../lambda
-      Events:
-        IncidentsGet:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HeatFloodApi
-            Path: /incidents
-            Method: GET
-      Policies:
-        - DynamoDBReadPolicy:
-            TableName: !Ref IncidentsTable
-
-  GetDemoScenarioFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: dist/getDemoScenario.handler
-      CodeUri: ../lambda
-      Events:
-        DemoGet:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HeatFloodApi
-            Path: /demo/scenarios/{id}
-            Method: GET
-
-  # -----------------------------------------------------------------------
-  # DynamoDB tables
-  # -----------------------------------------------------------------------
   IncidentsTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
     Properties:
-      TableName: heatflood-incidents
+      TableName: !Sub 'heatflood-incidents-${Stage}'
       BillingMode: PAY_PER_REQUEST
+      TimeToLiveSpecification:
+        AttributeName: ttlEpoch
+        Enabled: true
       AttributeDefinitions:
         - AttributeName: incidentId
           AttributeType: S
@@ -161,14 +55,12 @@ Resources:
               KeyType: RANGE
           Projection:
             ProjectionType: ALL
-      TimeToLiveSpecification:
-        AttributeName: ttlEpoch
-        Enabled: true
 
   HotspotsTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
     Properties:
-      TableName: heatflood-hotspots
+      TableName: !Sub 'heatflood-hotspots-${Stage}'
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: hotspotId
@@ -177,38 +69,125 @@ Resources:
         - AttributeName: hotspotId
           KeyType: HASH
 
-  AuditTable:
-    Type: AWS::DynamoDB::Table
+  # ------------------------------------------------------------------ #
+  # Lambda Functions
+  # ------------------------------------------------------------------ #
+
+  AnalyseRoutesFunction:
+    Type: AWS::Serverless::Function
     Properties:
-      TableName: heatflood-audit
-      BillingMode: PAY_PER_REQUEST
-      AttributeDefinitions:
-        - AttributeName: auditId
-          AttributeType: S
-        - AttributeName: entityId
-          AttributeType: S
-        - AttributeName: createdAt
-          AttributeType: S
-      KeySchema:
-        - AttributeName: auditId
-          KeyType: HASH
-      GlobalSecondaryIndexes:
-        - IndexName: entityId-createdAt-index
-          KeySchema:
-            - AttributeName: entityId
-              KeyType: HASH
-            - AttributeName: createdAt
-              KeyType: RANGE
-          Projection:
-            ProjectionType: ALL
+      FunctionName: !Sub 'heatflood-analyseRoutes-${Stage}'
+      Handler: dist/handlers/analyseRoutes.handler
+      CodeUri: ../lambda
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref IncidentsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref HotspotsTable
+        - SSMParameterReadPolicy:
+            ParameterName: /heatflood/mapbox-token
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /routes/analyse
+            Method: POST
+
+  GetStatusFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'heatflood-getStatus-${Stage}'
+      Handler: dist/handlers/getStatus.handler
+      CodeUri: ../lambda
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref IncidentsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref HotspotsTable
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /status
+            Method: GET
+
+  CreateIncidentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'heatflood-createIncident-${Stage}'
+      Handler: dist/handlers/createIncident.handler
+      CodeUri: ../lambda
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref IncidentsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref IncidentsTable
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /incidents
+            Method: POST
+
+  ListIncidentsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'heatflood-listIncidents-${Stage}'
+      Handler: dist/handlers/listIncidents.handler
+      CodeUri: ../lambda
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref IncidentsTable
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /incidents
+            Method: GET
+
+  HealthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'heatflood-health-${Stage}'
+      Handler: dist/handlers/health.handler
+      CodeUri: ../lambda
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /health
+            Method: GET
+
+  # ------------------------------------------------------------------ #
+  # API Gateway
+  # ------------------------------------------------------------------ #
+
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      Name: !Sub 'heatflood-api-${Stage}'
+      StageName: !Ref Stage
+      CorsConfiguration:
+        AllowOrigins:
+          - '*'
+        AllowMethods:
+          - GET
+          - POST
+          - OPTIONS
+        AllowHeaders:
+          - Content-Type
+          - X-Request-Id
 
 Outputs:
   ApiUrl:
-    Description: HTTP API base URL
-    Value: !Sub 'https://${HeatFloodApi}.execute-api.${AWS::Region}.amazonaws.com/prod'
+    Description: API Gateway base URL
+    Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}'
   IncidentsTableName:
     Value: !Ref IncidentsTable
   HotspotsTableName:
     Value: !Ref HotspotsTable
-  AuditTableName:
-    Value: !Ref AuditTable
