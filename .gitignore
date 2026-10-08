@@ -47,8 +47,15 @@ playwright-report/
 
 # Data files with personal or sensitive content
 data/private/
+# Python pycache & bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
 ml/.venv/
 ml/data/model/
 ml/data/mumbai_weather.csv
-ml/src/__pycache__/
-ml/__pycache__/
+
+# Generated build files
+apps/web/src/app/tailwind-built.css
+
