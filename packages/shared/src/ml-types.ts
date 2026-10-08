@@ -6,6 +6,13 @@
  * returns { available: false }. The interface is retained so a
  * SageMakerMlRiskProvider can be dropped in post-hackathon without
  * changing any calling code in segmentScorer.
+ *
+ * Perf note (optimised):
+ *   - DisabledMlRiskProvider.predict() was async, causing a Promise
+ *     microtask allocation on every call despite being a synchronous
+ *     literal return. Changed to synchronous return.
+ *   - MlRiskProvider interface updated to Promise<MlRiskSignal> | MlRiskSignal
+ *     so real async providers (SageMaker) remain valid implementations.
  */
 import { ML_FEATURE_VERSION } from './constants';
 
@@ -28,7 +35,7 @@ export interface FloodSegmentFeaturesV1 {
   // Reports — use 0 if no reports (0 is genuine here)
   recent_report_count: number;
   verified_report_count: number;
-  newest_report_age_min: number | null; // null = no reports
+  newest_report_age_min: number | null;
 
   // Temporal
   hour_of_day: number;   // 0–23 IST
@@ -48,17 +55,20 @@ export interface MlRiskSignal {
   reasonUnavailable?: 'disabled' | 'timeout' | 'error' | 'invalid' | 'no_model';
 }
 
+/**
+ * Provider interface. Real async providers (e.g. SageMaker HTTP) return
+ * Promise<MlRiskSignal>; synchronous stubs may return MlRiskSignal directly.
+ */
 export interface MlRiskProvider {
-  predict(features: FloodSegmentFeaturesV1): Promise<MlRiskSignal>;
+  predict(features: FloodSegmentFeaturesV1): Promise<MlRiskSignal> | MlRiskSignal;
 }
 
 /**
- * Final implementation for the hackathon sprint.
- * Always returns { available: false, reasonUnavailable: 'disabled' }.
- * Replace with a SageMakerMlRiskProvider post-hackathon.
+ * Hackathon-sprint stub. Always returns { available: false } synchronously.
+ * Replace with SageMakerMlRiskProvider post-hackathon.
  */
 export class DisabledMlRiskProvider implements MlRiskProvider {
-  async predict(_features: FloodSegmentFeaturesV1): Promise<MlRiskSignal> {
+  predict(_features: FloodSegmentFeaturesV1): MlRiskSignal {
     return {
       available: false,
       featureVersion: ML_FEATURE_VERSION,

@@ -1,13 +1,20 @@
 /**
- * GET /status?lat=&lon= — Day 2 REAL implementation
+ * GET /status?lat=&lon=
  *
  * Returns live weather snapshot + incident count for the area.
+ *
+ * Fix notes (optimised):
+ *   - Merged two separate import statements from the same module
+ *     (fetchNearbyIncidents + fetchAllHotspots were split imports)
+ *   - fetchAllHotspots() replaced with getHotspots() from hotspotCache;
+ *     the old call bypassed the 15-min in-memory cache and issued a
+ *     fresh DynamoDB ScanCommand on every /status request
  */
 import { APIGatewayProxyHandlerV2 } from 'aws-lambda';
 import { AreaStatusResponse, isInsidePilotZone, PILOT_BBOX } from '@heatflood/shared';
 import { fetchWeather } from '../adapters/openMeteo';
 import { fetchNearbyIncidents } from '../adapters/dynamodb';
-import { fetchAllHotspots } from '../adapters/dynamodb';
+import { getHotspots } from '../utils/hotspotCache';
 import { logger } from '../utils/logger';
 
 export const handler: APIGatewayProxyHandlerV2 = async (event) => {
@@ -24,7 +31,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
   const [weather, incidents, hotspots] = await Promise.all([
     fetchWeather(lat, lon, new Date()),
     fetchNearbyIncidents(lat, lon),
-    fetchAllHotspots(),
+    getHotspots(), // uses 15-min in-memory cache
   ]);
 
   const response: AreaStatusResponse = {

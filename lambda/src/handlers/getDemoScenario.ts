@@ -1,14 +1,19 @@
 /**
- * GET /demo/scenarios/:id — Day 4
+ * GET /demo/scenarios/:id
  *
  * Returns a pre-set scenario fixture that the frontend sends straight
  * to POST /routes/analyse with isReplay=true.
  *
- * The _weatherOverride and _incidentOverrides fields are read by
- * analyseRoutes when isReplay=true to inject fixture data instead
- * of calling external APIs.
- *
  * Available scenario IDs: heat | flood | compound
+ *
+ * Perf notes (optimised):
+ *   - Scenario files are static — they never change at runtime.
+ *     Previously fs.readFileSync + JSON.parse ran on every request.
+ *     Now files are loaded ONCE at module initialisation into SCENARIO_CACHE
+ *     as raw strings (no JSON.parse needed).
+ *   - JSON.parse → JSON.stringify round-trip eliminated: the raw JSON string
+ *     is stored and returned directly as the response body, saving a full
+ *     object graph allocation per request.
  */
 import { APIGatewayProxyHandlerV2 } from 'aws-lambda';
 import * as fs from 'fs';
@@ -16,42 +21,55 @@ import * as path from 'path';
 import { logger } from '../utils/logger';
 
 const SCENARIO_DIR = path.join(__dirname, '..', '..', '..', 'data', 'scenarios');
-const VALID_IDS = new Set(['heat', 'flood', 'compound']);
+const VALID_IDS = ['heat', 'flood', 'compound'] as const;
+type ScenarioId = typeof VALID_IDS[number];
+
+/** Load all scenario files once at cold-start. Warm invocations reuse this Map. */
+const SCENARIO_CACHE = new Map<ScenarioId, string>();
+for (const id of VALID_IDS) {
+  try {
+    const raw = fs.readFileSync(path.join(SCENARIO_DIR, `${id}.json`), 'utf8');
+    SCENARIO_CACHE.set(id, raw); // store raw string — no JSON.parse needed
+  } catch {
+    // File missing at deploy time; handler returns 404 for this id
+  }
+}
+
+const VALID_ID_SET = new Set<string>(VALID_IDS);
 
 export const handler: APIGatewayProxyHandlerV2 = async (event) => {
   const id = event.pathParameters?.id ?? '';
 
-  if (!VALID_IDS.has(id)) {
+  if (!VALID_ID_SET.has(id)) {
     return {
       statusCode: 404,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         error: 'SCENARIO_NOT_FOUND',
-        validIds: [...VALID_IDS],
+        validIds: VALID_IDS,
       }),
     };
   }
 
-  try {
-    const filePath = path.join(SCENARIO_DIR, `${id}.json`);
-    const raw = fs.readFileSync(filePath, 'utf8');
-    const scenario = JSON.parse(raw);
-
-    logger.info('getDemoScenario served', { id });
-
-    return {
-      statusCode: 200,
-      headers: {
-        'Content-Type': 'application/json',
-        'Cache-Control': 'public, max-age=300', // 5 min CDN cache
-      },
-      body: JSON.stringify(scenario),
-    };
-  } catch (err) {
-    logger.error('getDemoScenario read error', { id, err });
+  const raw = SCENARIO_CACHE.get(id as ScenarioId);
+  if (!raw) {
+    // File was missing at deploy time
+    logger.error('getDemoScenario: file not found in cache', { id });
     return {
       statusCode: 500,
       body: JSON.stringify({ error: 'SCENARIO_READ_ERROR' }),
     };
   }
+
+  logger.info('getDemoScenario served', { id });
+
+  return {
+    statusCode: 200,
+    headers: {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'public, max-age=300',
+    },
+    // Return raw string directly — no JSON.parse + JSON.stringify round-trip
+    body: raw,
+  };
 };
