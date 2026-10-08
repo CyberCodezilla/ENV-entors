@@ -1,7 +1,11 @@
 /**
- * HeatFlood Guardian — ML types and interface
- * Implemented as DisabledMlRiskProvider on Days 1–4.
- * SageMakerMlRiskProvider added by Member A on Day 5.
+ * HeatFlood Guardian — ML risk types and provider interface.
+ *
+ * SageMaker integration is out of scope for the 5-day sprint.
+ * The DisabledMlRiskProvider is the sole implementation and always
+ * returns { available: false }. The interface is retained so a
+ * SageMakerMlRiskProvider can be dropped in post-hackathon without
+ * changing any calling code in segmentScorer.
  */
 import { ML_FEATURE_VERSION } from './constants';
 
@@ -49,8 +53,9 @@ export interface MlRiskProvider {
 }
 
 /**
- * Default implementation — always returns unavailable.
- * Replace with SageMakerMlRiskProvider on Day 5.
+ * Final implementation for the hackathon sprint.
+ * Always returns { available: false, reasonUnavailable: 'disabled' }.
+ * Replace with a SageMakerMlRiskProvider post-hackathon.
  */
 export class DisabledMlRiskProvider implements MlRiskProvider {
   async predict(_features: FloodSegmentFeaturesV1): Promise<MlRiskSignal> {
