@@ -24,7 +24,7 @@ const client = dynamoClient;
 const INCIDENTS_TABLE = process.env.INCIDENTS_TABLE ?? 'heatflood-incidents';
 const HOTSPOTS_TABLE = process.env.HOTSPOTS_TABLE ?? 'heatflood-hotspots';
 
-function getGeohashNeighbors5(lat: number, lon: number): string[] {
+export function getGeohashNeighbors5(lat: number, lon: number): string[] {
   const dLat = 0.035;
   const dLon = 0.035;
   const hashes = new Set<string>();

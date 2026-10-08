@@ -123,6 +123,8 @@ export function Map({ routes, selectedRouteId, incidents, onBboxChange, onReques
     const map = mapRef.current;
     if (!map || !ready) return;
 
+    const eventCleanups: Array<() => void> = [];
+
     // Cleanup
     map.getStyle()?.layers?.forEach(l => {
       if (l.id.startsWith('route-') || l.id.startsWith('seg-')) map.removeLayer(l.id);
@@ -194,7 +196,7 @@ export function Map({ routes, selectedRouteId, incidents, onBboxChange, onReques
           paint: { 'line-color': '#ffffff', 'line-width': 20, 'line-opacity': 0 }, // invisible hit area
         });
 
-        map.on('mousemove', segHoverId, (e) => {
+        const onMouseMove = (e: mapboxgl.MapLayerMouseEvent) => {
           const props = e.features?.[0]?.properties;
           if (!props) return;
           setTooltip({
@@ -214,10 +216,19 @@ export function Map({ routes, selectedRouteId, incidents, onBboxChange, onReques
             y: e.originalEvent.clientY,
           });
           map.getCanvas().style.cursor = 'crosshair';
-        });
-        map.on('mouseleave', segHoverId, () => {
+        };
+
+        const onMouseLeave = () => {
           setTooltip(null);
           map.getCanvas().style.cursor = '';
+        };
+
+        map.on('mousemove', segHoverId, onMouseMove);
+        map.on('mouseleave', segHoverId, onMouseLeave);
+
+        eventCleanups.push(() => {
+          map.off('mousemove', segHoverId, onMouseMove);
+          map.off('mouseleave', segHoverId, onMouseLeave);
         });
       });
     });
@@ -233,6 +244,10 @@ export function Map({ routes, selectedRouteId, incidents, onBboxChange, onReques
         { padding: 60, maxZoom: 15, duration: 800 }
       );
     }
+
+    return () => {
+      eventCleanups.forEach(fn => fn());
+    };
   }, [routes, selectedRouteId, ready]);
 
   // ---- Incident markers ----

@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import xgboost as xgb
 from sklearn.metrics import roc_auc_score, average_precision_score, precision_recall_fscore_support, brier_score_loss, confusion_matrix
-from sklearn.model_selection import TimeSeriesSplit
+
 from features import NUMERIC_FEATURES, FEATURE_VERSION
 
 

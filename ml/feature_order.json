@@ -1,1 +1,1 @@
-["rain_1h_mm","rain_3h_mm","rain_6h_mm","rain_24h_mm","rain_intensity_1h","rain_intensity_3h","rain_accel_3h","rain_nonzero_hours_6h","distance_hotspot_m","hotspot_density_500m","hotspot_density_1km","hour_sin","hour_cos","dow_sin","dow_cos","month_sin","month_cos"]
+["rain_1h_mm","rain_3h_mm","rain_forecast_1h_mm","relative_humidity_pct","apparent_temperature_c","distance_hotspot_m","hotspot_overlap","recent_report_count","verified_report_count","newest_report_age_min","hour_sin","hour_cos","dow_sin","dow_cos","month_sin","month_cos"]

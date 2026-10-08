@@ -107,17 +107,6 @@ export async function scoreSegment(input: SegmentInput): Promise<SegmentAssessme
       }, Infinity)
     : null;
 
-  // --- Confidence ---
-  const confidence = calculateConfidence({
-    weatherAgeMinutes: input.weatherAgeMinutes,
-    incidentCount: input.nearbyIncidents.length,
-    verifiedIncidentCount: verifiedIncidents.length,
-    oldestIncidentAgeMinutes,
-    hotspotDataAvailable: input.nearbyHotspots.length > 0,
-    conflictingReports: false,
-    mlAvailable: false,
-  });
-
   // --- ML signal ---
   // Skip the Promise.race + setTimeout entirely for DisabledMlRiskProvider
   // (saves ~0.1 ms per segment × N segments × M routes)
@@ -165,6 +154,17 @@ export async function scoreSegment(input: SegmentInput): Promise<SegmentAssessme
       };
     }
   }
+
+  // --- Confidence ---
+  const confidence = calculateConfidence({
+    weatherAgeMinutes: input.weatherAgeMinutes,
+    incidentCount: input.nearbyIncidents.length,
+    verifiedIncidentCount: verifiedIncidents.length,
+    oldestIncidentAgeMinutes,
+    hotspotDataAvailable: input.nearbyHotspots.length > 0,
+    conflictingReports: false,
+    mlAvailable: mlSignal.available,
+  });
 
   return {
     segmentIndex: input.segmentIndex,

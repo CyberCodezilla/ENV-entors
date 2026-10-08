@@ -22,10 +22,13 @@ import {
   splitRouteIntoSegments,
   haversineDistanceM,
   SEGMENT_PARAMS,
+  SAGEMAKER_ENABLED,
+  calculateOldestIncidentAge,
 } from '@heatflood/shared';
 import { fetchMapboxRoutes } from '../adapters/mapbox';
 import { fetchWeather, WeatherSnapshot } from '../adapters/openMeteo';
 import { fetchNearbyIncidents } from '../adapters/dynamodb';
+import { SageMakerMlRiskProvider } from '../adapters/sagemaker';
 import { getHotspots } from '../utils/hotspotCache';
 import { scoreSegment } from '../engine/segmentScorer';
 import { rankRoutes, RawRoute } from '../engine/routeRanker';
@@ -33,6 +36,7 @@ import { logger } from '../utils/logger';
 import type { ActiveIncident, FloodHotspot } from '../engine/floodRisk';
 
 const MAPBOX_TOKEN = process.env.MAPBOX_TOKEN ?? '';
+const mlProvider = SAGEMAKER_ENABLED ? new SageMakerMlRiskProvider() : undefined;
 
 function buildReplayWeather(override: Record<string, unknown>): WeatherSnapshot {
   return {
@@ -177,6 +181,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
               heatSensitive: request.heatSensitive ?? false,
               mode: request.mode,
               now,
+              mlProvider,
             });
           }),
         );
@@ -193,14 +198,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
 
     const { routes, hasConfidentRecommendation, noConfidentRouteReason } = rankRoutes(rawRoutes);
 
-    // Use reduce instead of Math.max(...spread) to avoid stack overflow
-    // when incidents array is large (spread pushes all elements onto the call stack)
-    const oldestIncidentAge = incidents.length > 0
-      ? incidents.reduce((max, i) => {
-          const age = (now.getTime() - new Date(i.observedAt).getTime()) / 60_000;
-          return age > max ? age : max;
-        }, 0)
-      : null;
+    const oldestIncidentAge = calculateOldestIncidentAge(incidents, now);
 
     const response: AnalyseRoutesResponse = {
       requestId,
@@ -228,7 +226,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         hotspotsLoadedAt: now.toISOString(),
       },
 
-      mlAvailable: false,
+      mlAvailable: rawRoutes.some(r => r.segments.some(s => s.mlSignal?.available === true)),
       alternativesAvailable: routes.length > 1,
     };
 

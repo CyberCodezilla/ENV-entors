@@ -69,6 +69,30 @@ describe('calculateFloodRisk', () => {
     expect(out.score).toBeGreaterThan(0);
   });
 
+  it('corroborated community report raises risk score but does NOT cause hardBlock', () => {
+    const out = calculateFloodRisk({
+      segmentId: 'seg-corroborated',
+      precipitationMmPerHour: 0,
+      minutesSinceRainStop: null,
+      incidents: [{
+        incidentId: 'inc-corr',
+        latitude: 19.112,
+        longitude: 72.832,
+        type: 'road_blocked',
+        depthCategory: 'vehicle_impassable',
+        status: 'corroborated',
+        sourceType: 'community_report',
+        observedAt: NOW.toISOString(),
+        isDemo: false,
+      }],
+      hotspotDistanceM: null,
+      hotspotOverlap: false,
+      now: NOW,
+    });
+    expect(out.hardBlock).toBe(false);
+    expect(out.score).toBeGreaterThan(0);
+  });
+
   it('heavy rain returns flood score > 40', () => {
     const out = calculateFloodRisk({
       segmentId: 'seg-3',

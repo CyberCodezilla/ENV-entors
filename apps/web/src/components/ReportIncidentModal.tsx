@@ -37,6 +37,7 @@ export function ReportIncidentModal({ lat, lon, onClose, onSuccess }: Props) {
   const [depth, setDepth] = useState<string>('unknown');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [idempotencyKey] = useState(() => `report-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -49,7 +50,7 @@ export function ReportIncidentModal({ lat, lon, onClose, onSuccess }: Props) {
         type: type as CreateIncidentRequest['type'],
         depthCategory: depth as CreateIncidentRequest['depthCategory'],
         observedAt: new Date().toISOString(),
-        idempotencyKey: `report-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+        idempotencyKey,
       };
       const res = await api.createIncident(req);
       onSuccess(res.incidentId);
