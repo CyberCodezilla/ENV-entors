@@ -88,3 +88,4 @@ jobs:
           if [ "$DIST_ID" != "None" ] && [ -n "$DIST_ID" ]; then
             aws cloudfront create-invalidation --distribution-id $DIST_ID --paths "/*"
           fi
+          
