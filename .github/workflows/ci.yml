@@ -1,0 +1,69 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, dev ]
+  pull_request:
+    branches: [ main, dev ]
+
+jobs:
+  validate-test-deploy:
+    name: Validate, Test & Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Node Dependencies
+        run: npm ci
+
+      - name: Install Python Dependencies
+        run: pip install -r ml/requirements.txt
+
+      - name: Build Lambda Code
+        run: npm run build --workspace=lambda
+
+      - name: Run TypeScript Typecheck
+        run: npm run typecheck --workspaces
+
+      - name: Run Vitest Unit Tests
+        run: npx vitest run tests/unit
+
+      - name: Run Python ML Tests
+        run: |
+          export PYTHONPATH=ml
+          pytest ml/tests
+
+      - name: Setup AWS SAM CLI
+        uses: aws-actions/setup-sam@v2
+
+      - name: Validate SAM Infrastructure Template
+        run: sam validate -t infrastructure/template.yaml
+
+      - name: Configure AWS Credentials
+        if: github.ref == 'refs/heads/main' && secrets.AWS_ACCESS_KEY_ID != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-south-1
+
+      - name: Build & Deploy SAM Backend (Prod)
+        if: github.ref == 'refs/heads/main' && secrets.AWS_ACCESS_KEY_ID != ''
+        run: |
+          cd infrastructure
+          sam build
+          sam deploy --no-confirm-changeset --no-fail-on-empty-changeset --parameter-overrides Stage=prod AllowedOrigins="*"
