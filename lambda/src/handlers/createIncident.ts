@@ -159,6 +159,34 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
 
     const req = CreateIncidentRequestSchema.parse(body);
 
+    const queueUrl = process.env.INCIDENT_QUEUE_URL;
+    if (queueUrl) {
+      const incidentId = req.idempotencyKey || uuidv4();
+      const { SQSClient, SendMessageCommand } = await import('@aws-sdk/client-sqs');
+      const sqs = new SQSClient({ region: process.env.AWS_REGION ?? 'ap-south-1' });
+
+      await sqs.send(new SendMessageCommand({
+        QueueUrl: queueUrl,
+        MessageBody: JSON.stringify({
+          req,
+          clientIp,
+          requestedAt: now.toISOString(),
+        }),
+      }));
+
+      logger.info('createIncident queued asynchronously via SQS', { requestId, incidentId, clientIp });
+
+      return {
+        statusCode: 202,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          incidentId,
+          status: 'queued',
+          message: 'Report received and queued for asynchronous spatial processing',
+        }),
+      };
+    }
+
     if (req.idempotencyKey) {
       try {
         const existing = await client.send(new GetItemCommand({

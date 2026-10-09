@@ -8,6 +8,7 @@ Globals:
     MemorySize: 256
     Runtime: nodejs20.x
     Architectures: [arm64]
+    Tracing: Active
     Environment:
       Variables:
         AWS_NODEJS_CONNECTION_REUSE_ENABLED: '1'
@@ -210,17 +211,28 @@ Resources:
             Path: /status
             Method: GET
 
+  IncidentReportsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub 'heatflood-incident-queue-${Stage}'
+      VisibilityTimeout: 30
+
   CreateIncidentFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub 'heatflood-createIncident-${Stage}'
       Handler: createIncident.handler
       CodeUri: ../lambda/dist
+      Environment:
+        Variables:
+          INCIDENT_QUEUE_URL: !Ref IncidentReportsQueue
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref IncidentsTable
         - DynamoDBReadPolicy:
             TableName: !Ref IncidentsTable
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt IncidentReportsQueue.QueueName
       Events:
         Api:
           Type: HttpApi
@@ -229,7 +241,25 @@ Resources:
             Path: /incidents
             Method: POST
             Auth:
-              Authorizer: CognitoAuthorizer
+              Authorizer: NONE
+
+  IncidentWorkerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'heatflood-incidentWorker-${Stage}'
+      Handler: incidentWorker.handler
+      CodeUri: ../lambda/dist
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref IncidentsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref IncidentsTable
+      Events:
+        SQSEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt IncidentReportsQueue.Arn
+            BatchSize: 10
 
   ListIncidentsFunction:
     Type: AWS::Serverless::Function
@@ -300,6 +330,7 @@ Resources:
           - X-Request-Id
           - Authorization
       Auth:
+        DefaultAuthorizer: CognitoAuthorizer
         Authorizers:
           CognitoAuthorizer:
             AuthorizationScopes:
@@ -310,10 +341,132 @@ Resources:
               audience:
                 - !Ref UserPoolClient
 
+  # ------------------------------------------------------------------ #
+  # AWS WAF Association
+  # ------------------------------------------------------------------ #
+
+  ApiWebACLAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    Properties:
+      ResourceArn: !Sub 'arn:aws:apigateway:${AWS::Region}::/apis/${HttpApi}/stages/${Stage}'
+      WebACLArn: !GetAtt ApiWebACL.Arn
+
+  # ------------------------------------------------------------------ #
+  # CloudFront CDN Distribution with HTTPS for S3 Website
+  # ------------------------------------------------------------------ #
+
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'heatflood-frontend-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  CloudFrontOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub 'heatflood-oac-${Stage}'
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub '${FrontendBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${FrontendDistribution}'
+
+  FrontendDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        DefaultRootObject: index.html
+        Origins:
+          - Id: S3Origin
+            DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt CloudFrontOAC.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD]
+          Compress: true
+          ForwardedValues:
+            QueryString: false
+            Cookies:
+              Forward: none
+        HttpVersion: http2and3
+
+  # ------------------------------------------------------------------ #
+  # Observability & CloudWatch Alarms
+  # ------------------------------------------------------------------ #
+
+  Lambda5XXErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Alarm if Lambda 5XX error count exceeds threshold during extreme events
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+
+  LambdaDurationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Alarm if Lambda p95 execution latency exceeds 2.5 seconds
+      Namespace: AWS/Lambda
+      MetricName: Duration
+      ExtendedStatistic: p95
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 2500
+      ComparisonOperator: GreaterThanThreshold
+
+  WAFBlockedRequestsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Alarm if WAF rate-limiting rule blocks malicious flood traffic
+      Namespace: AWS/WAFV2
+      MetricName: BlockedRequests
+      Dimensions:
+        - Name: Rule
+          Value: IPBasedRateLimitRule
+        - Name: WebACL
+          Value: !Sub 'heatflood-webacl-${Stage}'
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 10
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+
 Outputs:
   ApiUrl:
     Description: API Gateway base URL
     Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}'
+  FrontendDistributionDomainName:
+    Description: CloudFront CDN Domain Name with HTTPS for Frontend S3 Bucket
+    Value: !GetAtt FrontendDistribution.DomainName
+  FrontendBucketName:
+    Value: !Ref FrontendBucket
   IncidentsTableName:
     Value: !Ref IncidentsTable
   HotspotsTableName:

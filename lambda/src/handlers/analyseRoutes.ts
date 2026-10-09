@@ -21,13 +21,15 @@ import {
   AnalyseRoutesResponse,
   splitRouteIntoSegments,
   haversineDistanceM,
+  encodeGeohash,
   SEGMENT_PARAMS,
   SAGEMAKER_ENABLED,
+  ML_FEATURE_VERSION,
   calculateOldestIncidentAge,
 } from '@heatflood/shared';
 import { fetchMapboxRoutes } from '../adapters/mapbox';
 import { fetchWeather, WeatherSnapshot } from '../adapters/openMeteo';
-import { fetchNearbyIncidents, fetchIncidentsForPoints } from '../adapters/dynamodb';
+import { fetchIncidentsForPoints } from '../adapters/dynamodb';
 import { SageMakerMlRiskProvider } from '../adapters/sagemaker';
 import { getHotspots } from '../utils/hotspotCache';
 import { scoreSegment } from '../engine/segmentScorer';
@@ -140,6 +142,71 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
           return arrival;
         });
 
+        // Batch SageMaker inference per route: aggregate all route segment features into a single payload
+        let precomputedMlSignals: import('@heatflood/shared').MlRiskSignal[] | undefined;
+        if (mlProvider?.predictBatch) {
+          const featureList = segs.map((seg, idx) => {
+            const [sLon, sLat] = seg.startCoord;
+            const [eLon, eLat] = seg.endCoord;
+            const segMidLat = (sLat + eLat) / 2;
+            const segMidLon = (sLon + eLon) / 2;
+
+            const nearbyIncidents = incidents.filter(inc =>
+              haversineDistanceM(segMidLat, segMidLon, inc.latitude, inc.longitude)
+              <= SEGMENT_PARAMS.hazardMatchRadiusM
+            );
+
+            const nearbyHotspots = hotspots.filter(hs =>
+              haversineDistanceM(segMidLat, segMidLon, hs.lat, hs.lon)
+              <= SEGMENT_PARAMS.hotspotMatchRadiusM
+            );
+
+            const verifiedIncidents = nearbyIncidents.filter(i => i.status === 'verified' || i.status === 'corroborated');
+            const newestIncidentAgeMin = nearbyIncidents.length > 0
+              ? nearbyIncidents.reduce((min, i) => {
+                  const age = (now.getTime() - new Date(i.observedAt).getTime()) / 60_000;
+                  return age < min ? age : min;
+                }, Infinity)
+              : null;
+
+            let hotspotDistanceM: number | null = null;
+            let hotspotOverlap = false;
+            for (const hs of nearbyHotspots) {
+              const d = haversineDistanceM(segMidLat, segMidLon, hs.lat, hs.lon);
+              if (d <= hs.radiusM) hotspotOverlap = true;
+              if (hotspotDistanceM === null || d < hotspotDistanceM) hotspotDistanceM = d;
+            }
+
+            const arrivalDate = arrivalTimes[idx];
+
+            return {
+              featureVersion: ML_FEATURE_VERSION,
+              predictionTimeUtc: arrivalDate.toISOString(),
+              segmentId: `seg-${idx}`,
+              rainfall_recent_1h_mm: weather.precipitationMm,
+              rainfall_recent_3h_mm: null,
+              rainfall_forecast_1h_mm: null,
+              relative_humidity_pct: weather.relativeHumidityPct,
+              apparent_temperature_c: weather.apparentTemperatureC,
+              hotspot_distance_m: hotspotDistanceM,
+              hotspot_overlap: hotspotOverlap ? (1 as const) : (0 as const),
+              recent_report_count: nearbyIncidents.length,
+              verified_report_count: verifiedIncidents.length,
+              newest_report_age_min: newestIncidentAgeMin,
+              hour_of_day: arrivalDate.getUTCHours(),
+              day_of_week: arrivalDate.getUTCDay(),
+              month: arrivalDate.getUTCMonth() + 1,
+              location_geohash5: encodeGeohash(segMidLat, segMidLon, 5),
+            };
+          });
+
+          try {
+            precomputedMlSignals = await mlProvider.predictBatch(featureList);
+          } catch {
+            // Fall back to per-segment evaluation if batch call fails
+          }
+        }
+
         const segmentAssessments = await Promise.all(
           segs.map(async (seg, idx) => {
             const [sLon, sLat] = seg.startCoord;
@@ -174,6 +241,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
               mode: request.mode,
               now,
               mlProvider,
+              precomputedMlSignal: precomputedMlSignals ? precomputedMlSignals[idx] : undefined,
             });
           }),
         );

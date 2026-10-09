@@ -38,48 +38,7 @@ export function getGeohashNeighbors5(lat: number, lon: number): string[] {
   return Array.from(hashes);
 }
 
-/**
- * Fetch active incidents within geohash cells covering the area around a point.
- * Precision 5 geohash = ~5 km² cells. We query the centre cell + 8 neighbours.
- */
-export async function fetchNearbyIncidents(
-  lat: number,
-  lon: number,
-): Promise<ActiveIncident[]> {
-  const geohashes = getGeohashNeighbors5(lat, lon);
-  const now = new Date().toISOString();
-  const incidentMap = new Map<string, ActiveIncident>();
 
-  try {
-    const results = await Promise.all(
-      geohashes.map(gh =>
-        client.send(new QueryCommand({
-          TableName: INCIDENTS_TABLE,
-          IndexName: 'geohash-createdAt-index',
-          KeyConditionExpression: 'geohash = :gh',
-          FilterExpression: 'expiresAt > :now AND #s <> :rejected',
-          ExpressionAttributeNames: { '#s': 'status' },
-          ExpressionAttributeValues: {
-            ':gh': { S: gh },
-            ':now': { S: now },
-            ':rejected': { S: 'rejected' },
-          },
-        }))
-      )
-    );
-
-    for (const res of results) {
-      for (const item of res.Items ?? []) {
-        const inc = unmarshall(item) as ActiveIncident;
-        incidentMap.set(inc.incidentId, inc);
-      }
-    }
-  } catch (err) {
-    logger.warn('DynamoDB fetchNearbyIncidents failed', { err, lat, lon });
-  }
-
-  return Array.from(incidentMap.values());
-}
 
 /**
  * Fetch active incidents across multiple sample points, deduplicating geohashes

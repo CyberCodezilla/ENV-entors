@@ -13,7 +13,7 @@
 import { APIGatewayProxyHandlerV2 } from 'aws-lambda';
 import { AreaStatusResponse, isInsidePilotZone, PILOT_BBOX } from '@heatflood/shared';
 import { fetchWeather } from '../adapters/openMeteo';
-import { fetchNearbyIncidents } from '../adapters/dynamodb';
+import { fetchIncidentsForPoints } from '../adapters/dynamodb';
 import { getHotspots } from '../utils/hotspotCache';
 import { logger } from '../utils/logger';
 
@@ -35,7 +35,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
 
     const [weather, incidents, hotspots] = await Promise.all([
       fetchWeather(lat, lon, new Date()),
-      fetchNearbyIncidents(lat, lon),
+      fetchIncidentsForPoints([{ lat, lon }]),
       getHotspots(), // uses 15-min in-memory cache
     ]);
 

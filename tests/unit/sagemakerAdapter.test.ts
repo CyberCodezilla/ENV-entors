@@ -76,4 +76,32 @@ describe('SageMaker Adapter & Feature Schema', () => {
     expect(result.mlSignal.available).toBe(true);
     expect(result.mlSignal.probability).toBe(0.85);
   });
+
+  it('predictBatch returns array of signals for multiple feature inputs', async () => {
+    const provider = new SageMakerMlRiskProvider();
+    const sampleFeature = {
+      featureVersion: ML_FEATURE_VERSION,
+      predictionTimeUtc: new Date().toISOString(),
+      segmentId: 'seg-1',
+      rainfall_recent_1h_mm: null,
+      rainfall_recent_3h_mm: null,
+      rainfall_forecast_1h_mm: null,
+      relative_humidity_pct: null,
+      apparent_temperature_c: null,
+      hotspot_distance_m: null,
+      hotspot_overlap: 0 as const,
+      recent_report_count: 0,
+      verified_report_count: 0,
+      newest_report_age_min: null,
+      hour_of_day: 12,
+      day_of_week: 2,
+      month: 7,
+      location_geohash5: null,
+    };
+
+    const results = await provider.predictBatch([sampleFeature, sampleFeature]);
+    expect(results).toHaveLength(2);
+    expect(results[0].available).toBe(false);
+    expect(results[0].reasonUnavailable).toBe('no_model');
+  });
 });

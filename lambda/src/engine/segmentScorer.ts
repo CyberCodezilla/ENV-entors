@@ -47,6 +47,7 @@ export interface SegmentInput {
 
   // ML (optional)
   mlProvider?: MlRiskProvider;
+  precomputedMlSignal?: import('@heatflood/shared').MlRiskSignal;
 }
 
 const DEFAULT_ML = new DisabledMlRiskProvider();
@@ -108,50 +109,52 @@ export async function scoreSegment(input: SegmentInput): Promise<SegmentAssessme
     : null;
 
   // --- ML signal ---
-  // Skip the Promise.race + setTimeout entirely for DisabledMlRiskProvider
-  // (saves ~0.1 ms per segment × N segments × M routes)
-  const mlProvider = input.mlProvider ?? DEFAULT_ML;
-  const isDisabled = mlProvider instanceof DisabledMlRiskProvider;
-
   let mlSignal;
-  if (isDisabled) {
-    mlSignal = {
-      available: false as const,
-      featureVersion: ML_FEATURE_VERSION,
-      reasonUnavailable: 'disabled' as const,
-    };
+  if (input.precomputedMlSignal) {
+    mlSignal = input.precomputedMlSignal;
   } else {
-    try {
-      mlSignal = await Promise.race([
-        mlProvider.predict({
-          featureVersion: ML_FEATURE_VERSION,
-          predictionTimeUtc: arrivalDate.toISOString(),
-          segmentId: `seg-${input.segmentIndex}`,
-          rainfall_recent_1h_mm: input.precipitationMmPerHour,
-          rainfall_recent_3h_mm: null,
-          rainfall_forecast_1h_mm: null,
-          relative_humidity_pct: input.relativeHumidityPct,
-          apparent_temperature_c: input.apparentTemperatureC,
-          hotspot_distance_m: hotspotDistanceM,
-          hotspot_overlap: hotspotOverlap ? 1 : 0,
-          recent_report_count: input.nearbyIncidents.length,
-          verified_report_count: verifiedIncidents.length,
-          newest_report_age_min: newestIncidentAgeMin,
-          hour_of_day: arrivalDate.getUTCHours(),
-          day_of_week: arrivalDate.getUTCDay(),
-          month: arrivalDate.getUTCMonth() + 1,
-          location_geohash5: encodeGeohash(midLat, midLon, 5),
-        }),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('ML timeout')), ML_TIMEOUT_MS)
-        ),
-      ]);
-    } catch {
+    const mlProvider = input.mlProvider ?? DEFAULT_ML;
+    const isDisabled = mlProvider instanceof DisabledMlRiskProvider;
+
+    if (isDisabled) {
       mlSignal = {
         available: false as const,
         featureVersion: ML_FEATURE_VERSION,
-        reasonUnavailable: 'timeout' as const,
+        reasonUnavailable: 'disabled' as const,
       };
+    } else {
+      try {
+        mlSignal = await Promise.race([
+          mlProvider.predict({
+            featureVersion: ML_FEATURE_VERSION,
+            predictionTimeUtc: arrivalDate.toISOString(),
+            segmentId: `seg-${input.segmentIndex}`,
+            rainfall_recent_1h_mm: input.precipitationMmPerHour,
+            rainfall_recent_3h_mm: null,
+            rainfall_forecast_1h_mm: null,
+            relative_humidity_pct: input.relativeHumidityPct,
+            apparent_temperature_c: input.apparentTemperatureC,
+            hotspot_distance_m: hotspotDistanceM,
+            hotspot_overlap: hotspotOverlap ? 1 : 0,
+            recent_report_count: input.nearbyIncidents.length,
+            verified_report_count: verifiedIncidents.length,
+            newest_report_age_min: newestIncidentAgeMin,
+            hour_of_day: arrivalDate.getUTCHours(),
+            day_of_week: arrivalDate.getUTCDay(),
+            month: arrivalDate.getUTCMonth() + 1,
+            location_geohash5: encodeGeohash(midLat, midLon, 5),
+          }),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('ML timeout')), ML_TIMEOUT_MS)
+          ),
+        ]);
+      } catch {
+        mlSignal = {
+          available: false as const,
+          featureVersion: ML_FEATURE_VERSION,
+          reasonUnavailable: 'timeout' as const,
+        };
+      }
     }
   }
 

@@ -39,33 +39,64 @@ function toCsv(f: FloodSegmentFeaturesV1): string {
 }
 
 export class SageMakerMlRiskProvider implements MlRiskProvider {
-  predict(features: FloodSegmentFeaturesV1): Promise<MlRiskSignal> {
+  async predict(features: FloodSegmentFeaturesV1): Promise<MlRiskSignal> {
+    const results = await this.predictBatch([features]);
+    return results[0];
+  }
+
+  predictBatch(featuresList: FloodSegmentFeaturesV1[]): Promise<MlRiskSignal[]> {
     const featureVersion = process.env.ML_FEATURE_VERSION ?? ML_FEATURE_VERSION;
-    if (!endpointName) return Promise.resolve({ available: false, featureVersion, reasonUnavailable: 'no_model' });
-    if (features.featureVersion !== featureVersion) return Promise.resolve({ available: false, featureVersion, reasonUnavailable: 'invalid' });
+    if (featuresList.length === 0) return Promise.resolve([]);
+    if (!endpointName) {
+      return Promise.resolve(featuresList.map(() => ({ available: false, featureVersion, reasonUnavailable: 'no_model' })));
+    }
+
+    const invalidFeatures = featuresList.some(f => f.featureVersion !== featureVersion);
+    if (invalidFeatures) {
+      return Promise.resolve(featuresList.map(f => f.featureVersion !== featureVersion
+        ? { available: false, featureVersion, reasonUnavailable: 'invalid' }
+        : { available: false, featureVersion, reasonUnavailable: 'no_model' }
+      ));
+    }
+
+    const csvPayload = featuresList.map(toCsv).join('\n');
+
     return new Promise(resolve => {
       const controller = new AbortController();
       const timer = setTimeout(() => {
         controller.abort();
-        resolve({ available: false, featureVersion, reasonUnavailable: 'timeout' });
+        resolve(featuresList.map(() => ({ available: false, featureVersion, reasonUnavailable: 'timeout' })));
       }, timeoutMs);
+
       client.send(
-        new InvokeEndpointCommand({ EndpointName: endpointName, ContentType: 'text/csv', Body: Buffer.from(toCsv(features)) }),
+        new InvokeEndpointCommand({ EndpointName: endpointName, ContentType: 'text/csv', Body: Buffer.from(csvPayload) }),
         { abortSignal: controller.signal }
       )
         .then(result => {
           clearTimeout(timer);
           const text = Buffer.from(result.Body ?? new Uint8Array()).toString('utf8').trim();
-          const probability = Number(text.split(/[\s,]+/)[0]);
-          if (!Number.isFinite(probability) || probability < 0 || probability > 1) {
-            resolve({ available: false, featureVersion, reasonUnavailable: 'invalid' });
-            return;
-          }
-          resolve({ available: true, probability, modelVersion: process.env.ML_MODEL_VERSION ?? 'xgb-flood-susceptibility-v2', featureVersion, predictedAt: new Date().toISOString() });
+          const lines = text ? text.split(/[\r\n]+/) : [];
+
+          const signals: MlRiskSignal[] = featuresList.map((_, idx) => {
+            const line = lines[idx] ?? '';
+            const probability = Number(line.split(/[\s,]+/)[0]);
+            if (!Number.isFinite(probability) || probability < 0 || probability > 1) {
+              return { available: false, featureVersion, reasonUnavailable: 'invalid' };
+            }
+            return {
+              available: true,
+              probability,
+              modelVersion: process.env.ML_MODEL_VERSION ?? 'xgb-flood-susceptibility-v2',
+              featureVersion,
+              predictedAt: new Date().toISOString(),
+            };
+          });
+          resolve(signals);
         })
         .catch(() => {
           clearTimeout(timer);
-          resolve({ available: false, featureVersion, reasonUnavailable: controller.signal.aborted ? 'timeout' : 'error' });
+          const reason = controller.signal.aborted ? 'timeout' : 'error';
+          resolve(featuresList.map(() => ({ available: false, featureVersion, reasonUnavailable: reason })));
         });
     });
   }

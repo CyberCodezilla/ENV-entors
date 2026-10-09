@@ -71,7 +71,7 @@ export function rankRoutes(rawRoutes: RawRoute[]): {
 
     for (let i = 0; i < n; i++) {
       const s = segs[i];
-      const w = s.segmentLengthM;
+      const w = s.segmentLengthM ?? 0;
 
       floodRisks[i] = s.floodRisk;
       heatRisks[i] = s.heatRisk;
@@ -156,7 +156,7 @@ export function rankRoutes(rawRoutes: RawRoute[]): {
   const confidentViableRoutes = viableRoutes.filter(r => r.overallConfidenceLevel !== 'limited');
   const hasConfidentRecommendation = confidentViableRoutes.length > 0;
   const noConfidentRouteReason = !hasConfidentRecommendation
-    ? 'All available routes intersect active hazard evidence or have limited confidence. Delay travel or check official guidance before proceeding.'
+    ? 'All available pedestrian/road routes intersect active hazard evidence or have limited confidence. Fallback recommendation: Seek elevated transit corridors (e.g., Mumbai Metro Line 1 / Line 2A elevated corridors across Andheri/Versova) or proceed to designated emergency high-ground rally points.'
     : null;
 
   return { routes: allRoutes, hasConfidentRecommendation, noConfidentRouteReason };

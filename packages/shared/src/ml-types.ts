@@ -61,6 +61,7 @@ export interface MlRiskSignal {
  */
 export interface MlRiskProvider {
   predict(features: FloodSegmentFeaturesV1): Promise<MlRiskSignal> | MlRiskSignal;
+  predictBatch?(featuresList: FloodSegmentFeaturesV1[]): Promise<MlRiskSignal[]> | MlRiskSignal[];
 }
 
 /**
@@ -74,5 +75,9 @@ export class DisabledMlRiskProvider implements MlRiskProvider {
       featureVersion: ML_FEATURE_VERSION,
       reasonUnavailable: 'disabled',
     };
+  }
+
+  predictBatch(featuresList: FloodSegmentFeaturesV1[]): MlRiskSignal[] {
+    return featuresList.map(f => this.predict(f));
   }
 }

@@ -32,6 +32,14 @@ export interface WeatherSnapshot {
 }
 
 const STALE_THRESHOLD_MINUTES = 30;
+const CACHE_TTL_MS = 15 * 60 * 1000; // 15-minute in-memory caching tier
+
+interface CacheEntry {
+  snapshot: WeatherSnapshot;
+  cachedAtMs: number;
+}
+
+const weatherCache = new Map<string, CacheEntry>();
 
 export async function fetchWeather(
   lat: number,
@@ -39,6 +47,14 @@ export async function fetchWeather(
   targetTimeUtc: Date,
 ): Promise<WeatherSnapshot> {
   const fetchedAt = new Date().toISOString();
+  const cacheKey = `${lat.toFixed(2)},${lon.toFixed(2)},${targetTimeUtc.toISOString().slice(0, 13)}`;
+  const nowMs = Date.now();
+
+  const cached = weatherCache.get(cacheKey);
+  if (cached && nowMs - cached.cachedAtMs < CACHE_TTL_MS) {
+    logger.info('Weather cache hit', { cacheKey });
+    return cached.snapshot;
+  }
 
   const url = new URL(BASE);
   url.searchParams.set('latitude', lat.toFixed(4));
@@ -88,7 +104,7 @@ export async function fetchWeather(
     const ageMinutes = (Date.now() - slotMs) / 60_000;
     const isStale = ageMinutes > STALE_THRESHOLD_MINUTES;
 
-    return {
+    const snapshot: WeatherSnapshot = {
       apparentTemperatureC: data.hourly.apparent_temperature[bestIdx] ?? null,
       relativeHumidityPct: data.hourly.relative_humidity_2m[bestIdx] ?? null,
       precipitationMm: data.hourly.precipitation[bestIdx] ?? null,
@@ -99,6 +115,9 @@ export async function fetchWeather(
       ageMinutes: Math.round(ageMinutes),
       error: null,
     };
+
+    weatherCache.set(cacheKey, { snapshot, cachedAtMs: nowMs });
+    return snapshot;
   } catch (err) {
     logger.error('Open-Meteo fetch failed', { err });
     return nullSnapshot(fetchedAt, 'Open-Meteo fetch failed');

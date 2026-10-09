@@ -24,17 +24,28 @@ import { logger } from '../utils/logger';
 const client = dynamoClient;
 const INCIDENTS_TABLE = process.env.INCIDENTS_TABLE ?? 'heatflood-incidents';
 
-function getGeohashesForBbox(lngMin: number, latMin: number, lngMax: number, latMax: number): string[] {
+const MAX_BBOX_SPAN = 0.25;
+const MAX_GEOHASHES = 25;
+
+export function getGeohashesForBbox(
+  lngMin: number,
+  latMin: number,
+  lngMax: number,
+  latMax: number,
+  maxGeohashes: number = MAX_GEOHASHES
+): string[] {
   const step = 0.03; // precision 5 cell width/height step (~4.9 km x 4.9 km)
   const set = new Set<string>();
   for (let lat = latMin; ; lat = Math.min(latMax, lat + step)) {
     for (let lon = lngMin; ; lon = Math.min(lngMax, lon + step)) {
       set.add(encodeGeohash(lat, lon, 5));
+      if (set.size >= maxGeohashes) break;
       if (lon >= lngMax) break;
     }
+    if (set.size >= maxGeohashes) break;
     if (lat >= latMax) break;
   }
-  return Array.from(set);
+  return Array.from(set).slice(0, maxGeohashes);
 }
 
 export const handler: APIGatewayProxyHandlerV2 = async (event) => {
@@ -55,6 +66,13 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
           body: JSON.stringify({ error: 'INVALID_BBOX', detail: 'bbox coordinates out of valid range' }),
         };
       }
+      if (latMax - latMin > MAX_BBOX_SPAN || lngMax - lngMin > MAX_BBOX_SPAN) {
+        return {
+          statusCode: 400,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ error: 'INVALID_BBOX', detail: `bbox span exceeds maximum allowed limit of ${MAX_BBOX_SPAN} degrees` }),
+        };
+      }
       isFilteredBbox = true;
     } else {
       return {
@@ -72,7 +90,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
 
     if (isFilteredBbox) {
       // Targeted GSI lookup over visible viewport geohashes — avoids O(N) full table scan
-      const targetGeohashes = getGeohashesForBbox(lngMin, latMin, lngMax, latMax);
+      const targetGeohashes = getGeohashesForBbox(lngMin, latMin, lngMax, latMax, MAX_GEOHASHES);
       const queryResults = await Promise.all(
         targetGeohashes.map(gh =>
           client.send(new QueryCommand({
