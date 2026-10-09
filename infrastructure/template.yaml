@@ -28,6 +28,15 @@ Parameters:
     Type: CommaDelimitedList
     Default: '*'
     Description: Allowed origins for API Gateway CORS configuration
+  SageMakerEnabled:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+    Description: Enable or disable AWS SageMaker ML inference endpoint integration
+  SageMakerEndpointName:
+    Type: String
+    Default: 'heatflood-xgb-v2'
+    Description: Name of the active AWS SageMaker inference endpoint
 
 Resources:
 
@@ -159,6 +168,8 @@ Resources:
       CodeUri: ../lambda/dist
       Environment:
         Variables:
+          SAGEMAKER_ENABLED: !Ref SageMakerEnabled
+          SAGEMAKER_ENDPOINT_NAME: !Ref SageMakerEndpointName
           MAPBOX_TOKEN: '{{resolve:ssm:/heatflood/mapbox-token}}'
       Policies:
         - DynamoDBReadPolicy:
@@ -167,6 +178,11 @@ Resources:
             TableName: !Ref HotspotsTable
         - SSMParameterReadPolicy:
             ParameterName: /heatflood/mapbox-token
+        - Statement:
+            - Effect: Allow
+              Action:
+                - sagemaker:InvokeEndpoint
+              Resource: !Sub 'arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:endpoint/*'
       Events:
         Api:
           Type: HttpApi
@@ -238,6 +254,10 @@ Resources:
       FunctionName: !Sub 'heatflood-health-${Stage}'
       Handler: health.handler
       CodeUri: ../lambda/dist
+      Environment:
+        Variables:
+          SAGEMAKER_ENABLED: !Ref SageMakerEnabled
+          SAGEMAKER_ENDPOINT_NAME: !Ref SageMakerEndpointName
       Events:
         Api:
           Type: HttpApi
