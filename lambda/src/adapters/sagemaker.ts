@@ -63,4 +63,8 @@ export class SageMakerMlRiskProvider implements MlRiskProvider {
       });
     });
   }
+
+  predictBatch(featuresList: FloodSegmentFeaturesV1[]): Promise<MlRiskSignal[]> {
+    return Promise.all(featuresList.map(f => this.predict(f)));
+  }
 }
