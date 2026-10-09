@@ -191,6 +191,8 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /routes/analyse
             Method: POST
+            Auth:
+              Authorizer: NONE
 
   GetStatusFunction:
     Type: AWS::Serverless::Function
@@ -210,12 +212,23 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /status
             Method: GET
+            Auth:
+              Authorizer: NONE
+
+  IncidentReportsDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub 'heatflood-incident-dlq-${Stage}'
+      MessageRetentionPeriod: 1209600
 
   IncidentReportsQueue:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: !Sub 'heatflood-incident-queue-${Stage}'
-      VisibilityTimeout: 30
+      VisibilityTimeout: 180
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt IncidentReportsDLQ.Arn
+        maxReceiveCount: 5
 
   CreateIncidentFunction:
     Type: AWS::Serverless::Function
@@ -228,8 +241,6 @@ Resources:
           INCIDENT_QUEUE_URL: !Ref IncidentReportsQueue
       Policies:
         - DynamoDBCrudPolicy:
-            TableName: !Ref IncidentsTable
-        - DynamoDBReadPolicy:
             TableName: !Ref IncidentsTable
         - SQSSendMessagePolicy:
             QueueName: !GetAtt IncidentReportsQueue.QueueName
@@ -252,14 +263,14 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref IncidentsTable
-        - DynamoDBReadPolicy:
-            TableName: !Ref IncidentsTable
       Events:
         SQSEvent:
           Type: SQS
           Properties:
             Queue: !GetAtt IncidentReportsQueue.Arn
             BatchSize: 10
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
 
   ListIncidentsFunction:
     Type: AWS::Serverless::Function
@@ -277,6 +288,8 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /incidents
             Method: GET
+            Auth:
+              Authorizer: NONE
 
   HealthFunction:
     Type: AWS::Serverless::Function
@@ -295,6 +308,8 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /health
             Method: GET
+            Auth:
+              Authorizer: NONE
 
   GetDemoScenarioFunction:
     Type: AWS::Serverless::Function
@@ -309,6 +324,46 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /demo/scenarios/{id}
             Method: GET
+            Auth:
+              Authorizer: NONE
+
+  VerifyIncidentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'heatflood-verifyIncident-${Stage}'
+      Handler: verifyIncident.handler
+      CodeUri: ../lambda/dist
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref IncidentsTable
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /incidents/{id}/verify
+            Method: PUT
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  DeleteIncidentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'heatflood-deleteIncident-${Stage}'
+      Handler: deleteIncident.handler
+      CodeUri: ../lambda/dist
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref IncidentsTable
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /incidents/{id}
+            Method: DELETE
+            Auth:
+              Authorizer: CognitoAuthorizer
 
   # ------------------------------------------------------------------ #
   # API Gateway
@@ -324,13 +379,14 @@ Resources:
         AllowMethods:
           - GET
           - POST
+          - PUT
+          - DELETE
           - OPTIONS
         AllowHeaders:
           - Content-Type
           - X-Request-Id
           - Authorization
       Auth:
-        DefaultAuthorizer: CognitoAuthorizer
         Authorizers:
           CognitoAuthorizer:
             AuthorizationScopes:
@@ -395,6 +451,16 @@ Resources:
       DistributionConfig:
         Enabled: true
         DefaultRootObject: index.html
+        Comment: HeatFlood Frontend Distribution
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 10
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 10
         Origins:
           - Id: S3Origin
             DomainName: !GetAtt FrontendBucket.RegionalDomainName

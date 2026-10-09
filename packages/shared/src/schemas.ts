@@ -30,6 +30,7 @@ export const IncidentStatusSchema = z.enum([
   'rejected',
   'resolved',
   'expired',
+  'queued',
 ]);
 
 export const IncidentTypeSchema = z.enum([
@@ -262,8 +263,9 @@ export type AreaStatusResponse = z.infer<typeof AreaStatusResponseSchema>;
 export const CreateIncidentResponseSchema = z.object({
   incidentId: z.string(),
   status: IncidentStatusSchema,
-  expiresAt: z.string().datetime({ offset: true }),
+  expiresAt: z.string().datetime({ offset: true }).optional(),
   duplicate: z.boolean().optional(),
+  message: z.string().optional(),
 });
 export type CreateIncidentResponse = z.infer<typeof CreateIncidentResponseSchema>;
 

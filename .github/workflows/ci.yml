@@ -66,4 +66,25 @@ jobs:
         run: |
           cd infrastructure
           sam build
-          sam deploy --no-confirm-changeset --no-fail-on-empty-changeset --parameter-overrides Stage=prod AllowedOrigins="*"
+          sam deploy \
+            --stack-name heatflood-guardian \
+            --region ap-south-1 \
+            --capabilities CAPABILITY_IAM \
+            --resolve-s3 \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides Stage=prod AllowedOrigins="*"
+
+      - name: Build Frontend App
+        if: github.ref == 'refs/heads/main' && secrets.AWS_ACCESS_KEY_ID != ''
+        run: npm run build --workspace=apps/web
+
+      - name: Deploy Frontend to S3 & Invalidate CloudFront
+        if: github.ref == 'refs/heads/main' && secrets.AWS_ACCESS_KEY_ID != ''
+        run: |
+          DIST_ID=$(aws cloudfront list-distributions --query "DistributionList.Items[?Comment=='HeatFlood Frontend Distribution' || contains(Origins.Items[0].DomainName, 'heatflood-frontend')].Id | [0]" --output text)
+          BUCKET_NAME=$(aws cloudformation describe-stacks --stack-name heatflood-guardian --query "Stacks[0].Outputs[?OutputKey=='FrontendBucketName'].OutputValue" --output text)
+          aws s3 sync apps/web/out s3://$BUCKET_NAME --delete
+          if [ "$DIST_ID" != "None" ] && [ -n "$DIST_ID" ]; then
+            aws cloudfront create-invalidation --distribution-id $DIST_ID --paths "/*"
+          fi

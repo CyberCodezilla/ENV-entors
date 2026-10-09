@@ -159,6 +159,18 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
 
     const req = CreateIncidentRequestSchema.parse(body);
 
+    const allowed = await checkRateLimit(clientIp, now);
+    if (!allowed) {
+      return {
+        statusCode: 429,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          error: 'RATE_LIMITED',
+          detail: `Maximum ${RATE_LIMIT_PER_HOUR} reports per hour per source`,
+        }),
+      };
+    }
+
     const queueUrl = process.env.INCIDENT_QUEUE_URL;
     if (queueUrl) {
       const incidentId = req.idempotencyKey || uuidv4();
@@ -209,18 +221,6 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
       } catch {
         // fail open to standard creation pipeline on transient query error
       }
-    }
-
-    const allowed = await checkRateLimit(clientIp, now);
-    if (!allowed) {
-      return {
-        statusCode: 429,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          error: 'RATE_LIMITED',
-          detail: `Maximum ${RATE_LIMIT_PER_HOUR} reports per hour per source`,
-        }),
-      };
     }
 
     const unverifiedExpiry = new Date(now.getTime() + TTL_MINUTES.unverifiedReport * 60_000);

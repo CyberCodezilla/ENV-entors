@@ -53,7 +53,11 @@ export default function HomePage() {
     const [lngMin, latMin, lngMax, latMax] = bboxRef.current;
     try {
       const res = await api.getIncidents(lngMin, latMin, lngMax, latMax);
-      setIncidents(res.incidents);
+      setIncidents(prev => {
+        const fetchedIds = new Set(res.incidents.map(i => (i as { incidentId: string }).incidentId));
+        const optimisticPending = prev.filter(i => i.isOptimistic && !fetchedIds.has(i.incidentId));
+        return [...(res.incidents as MapIncident[]), ...optimisticPending];
+      });
     } catch { /* fail silently */ }
   }, []);
 
@@ -117,10 +121,28 @@ export default function HomePage() {
     }
   }
 
-  function handleReportSuccess(_incidentId: string) {
+  function handleReportSuccess(
+    incidentId: string,
+    details?: { latitude: number; longitude: number; type: string; depthCategory: string; status: string }
+  ) {
     setReportCoords(null);
     setShowReportSuccess(true);
     setTimeout(() => setShowReportSuccess(false), 4000);
+
+    if (details) {
+      const optimisticIncident: MapIncident = {
+        incidentId,
+        latitude: details.latitude,
+        longitude: details.longitude,
+        type: details.type,
+        depthCategory: details.depthCategory,
+        status: details.status || 'queued',
+        observedAt: new Date().toISOString(),
+        isOptimistic: true,
+      };
+      setIncidents(prev => [optimisticIncident, ...prev.filter(i => i.incidentId !== incidentId)]);
+    }
+
     fetchIncidents();
   }
 

@@ -24,7 +24,7 @@ import { logger } from '../utils/logger';
 const client = dynamoClient;
 const INCIDENTS_TABLE = process.env.INCIDENTS_TABLE ?? 'heatflood-incidents';
 
-const MAX_BBOX_SPAN = 0.25;
+const MAX_BBOX_SPAN = 1.0;
 const MAX_GEOHASHES = 25;
 
 export function getGeohashesForBbox(

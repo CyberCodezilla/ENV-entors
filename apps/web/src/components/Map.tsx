@@ -28,6 +28,7 @@ export interface MapIncident {
   status: string;
   depthCategory: string;
   observedAt: string;
+  isOptimistic?: boolean;
 }
 
 interface TooltipState {
@@ -260,11 +261,12 @@ export function Map({ routes, selectedRouteId, incidents, onBboxChange, onReques
     incidents.forEach(inc => {
       const icon = INCIDENT_ICONS[inc.type] ?? INCIDENT_ICONS.other;
       const isVerified = inc.status === 'verified' || inc.status === 'corroborated';
+      const isOptimistic = inc.isOptimistic || inc.status === 'queued';
 
       const el = document.createElement('div');
       el.style.cssText = [
         'width:28px', 'height:28px', 'border-radius:50%',
-        `background:${isVerified ? '#ef4444' : '#f59e0b'}`,
+        `background:${isVerified ? '#ef4444' : isOptimistic ? '#3b82f6' : '#f59e0b'}`,
         'border:2px solid #fff', 'display:flex', 'align-items:center',
         'justify-content:center', 'font-size:14px', 'cursor:pointer',
         'box-shadow:0 2px 6px rgba(0,0,0,0.5)',
@@ -275,7 +277,7 @@ export function Map({ routes, selectedRouteId, incidents, onBboxChange, onReques
         <div style="color:#1f2937;font-size:13px;min-width:160px">
           <div style="font-weight:600;margin-bottom:4px">${inc.type.replace(/_/g, ' ')}</div>
           <div>Depth: ${inc.depthCategory}</div>
-          <div>Status: <strong>${inc.status}</strong></div>
+          <div>Status: <strong>${isOptimistic ? 'queued (optimistic pending)' : inc.status}</strong></div>
           <div style="color:#6b7280;font-size:11px;margin-top:4px">
             ${new Date(inc.observedAt).toLocaleTimeString()}
           </div>

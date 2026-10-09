@@ -65,6 +65,74 @@ export class SageMakerMlRiskProvider implements MlRiskProvider {
   }
 
   predictBatch(featuresList: FloodSegmentFeaturesV1[]): Promise<MlRiskSignal[]> {
-    return Promise.all(featuresList.map(f => this.predict(f)));
+    const endpointName = process.env.SAGEMAKER_ENDPOINT_NAME ?? '';
+    const fallbackSignal = (reason: 'no_model' | 'invalid' | 'timeout' | 'error'): MlRiskSignal => ({
+      available: false,
+      featureVersion: ML_FEATURE_VERSION,
+      reasonUnavailable: reason,
+    });
+
+    if (!endpointName) {
+      return Promise.resolve(featuresList.map(() => fallbackSignal('no_model')));
+    }
+
+    if (featuresList.some(f => f.featureVersion !== ML_FEATURE_VERSION)) {
+      return Promise.resolve(featuresList.map(() => fallbackSignal('invalid')));
+    }
+
+    if (featuresList.length === 0) {
+      return Promise.resolve([]);
+    }
+
+    const csvPayload = featuresList.map(featuresToCsv).join('\n');
+
+    return new Promise(resolve => {
+      let settled = false;
+      const finish = (signals: MlRiskSignal[]) => {
+        if (settled) return;
+        settled = true;
+        resolve(signals);
+      };
+
+      const timer = setTimeout(() => {
+        finish(featuresList.map(() => fallbackSignal('timeout')));
+      }, timeoutMs);
+
+      client.send(new InvokeEndpointCommand({
+        EndpointName: endpointName,
+        ContentType: 'text/csv',
+        Body: Buffer.from(csvPayload),
+      })).then(result => {
+        clearTimeout(timer);
+        const text = Buffer.from(result.Body ?? new Uint8Array()).toString('utf8').trim();
+        if (!text) {
+          finish(featuresList.map(() => fallbackSignal('invalid')));
+          return;
+        }
+        const lines = text.split(/\r?\n/);
+        const nowIso = new Date().toISOString();
+        const modelVer = process.env.ML_MODEL_VERSION ?? 'xgb-rainfall-stress-v1';
+
+        const signals: MlRiskSignal[] = featuresList.map((_, idx) => {
+          const line = lines[idx] ?? '';
+          const probability = Number(line.trim().split(/[\s,]+/)[0]);
+          if (Number.isFinite(probability) && probability >= 0 && probability <= 1) {
+            return {
+              available: true,
+              probability,
+              modelVersion: modelVer,
+              featureVersion: ML_FEATURE_VERSION,
+              predictedAt: nowIso,
+            };
+          }
+          return fallbackSignal('invalid');
+        });
+
+        finish(signals);
+      }).catch(() => {
+        clearTimeout(timer);
+        finish(featuresList.map(() => fallbackSignal('error')));
+      });
+    });
   }
 }

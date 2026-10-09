@@ -13,7 +13,7 @@ interface Props {
   lat: number;
   lon: number;
   onClose: () => void;
-  onSuccess: (incidentId: string) => void;
+  onSuccess: (incidentId: string, details?: { latitude: number; longitude: number; type: string; depthCategory: string; status: string }) => void;
 }
 
 const INCIDENT_TYPES = [
@@ -53,7 +53,13 @@ export function ReportIncidentModal({ lat, lon, onClose, onSuccess }: Props) {
         idempotencyKey,
       };
       const res = await api.createIncident(req);
-      onSuccess(res.incidentId);
+      onSuccess(res.incidentId, {
+        latitude: lat,
+        longitude: lon,
+        type,
+        depthCategory: depth,
+        status: res.status ?? 'queued',
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to submit report');
     } finally {

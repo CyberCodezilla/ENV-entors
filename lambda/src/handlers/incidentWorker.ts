@@ -6,7 +6,7 @@
  *   - Deduplication via DynamoDB conditional put
  *   - Anomaly detection & TTL assignment
  */
-import { SQSEvent, SQSHandler } from 'aws-lambda';
+import { SQSEvent, SQSBatchResponse } from 'aws-lambda';
 import {
   CreateIncidentRequest,
   Incident,
@@ -78,8 +78,9 @@ async function findCorroborating(
   }
 }
 
-export const handler: SQSHandler = async (event: SQSEvent) => {
+export const handler = async (event: SQSEvent): Promise<SQSBatchResponse> => {
   logger.info('incidentWorker batch start', { recordCount: event.Records.length });
+  const batchItemFailures: { itemIdentifier: string }[] = [];
 
   for (const record of event.Records) {
     try {
@@ -135,7 +136,9 @@ export const handler: SQSHandler = async (event: SQSEvent) => {
       }
     } catch (err) {
       logger.error('incidentWorker failed record', { messageId: record.messageId, err });
-      throw err;
+      batchItemFailures.push({ itemIdentifier: record.messageId });
     }
   }
+
+  return { batchItemFailures };
 };
