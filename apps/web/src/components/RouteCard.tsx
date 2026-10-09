@@ -31,10 +31,6 @@ function formatDistance(m: number): string {
 export function RouteCard({ route, isSelected, onSelect, isReplay = false, freshness }: Props) {
   const isBlocked = route.isHardBlocked;
   const isRecommended = route.rank === 1 && !isBlocked;
-  const mlSignals = route.segments.map(s => s.mlSignal).filter(s => s?.available && typeof s.probability === 'number');
-  const mlProbability = mlSignals.length > 0
-    ? mlSignals.reduce((sum, s) => sum + (s?.probability ?? 0), 0) / mlSignals.length
-    : null;
 
   return (
     <button
@@ -74,12 +70,6 @@ export function RouteCard({ route, isSelected, onSelect, isReplay = false, fresh
         <RiskBadge level={route.overallHeatLevel} type="heat" score={route.weightedHeatExposure} small />
         <ConfidenceBadge level={route.overallConfidenceLevel} showExplainer />
       </div>
-
-      {mlProbability !== null && (
-        <p className="text-[11px] text-blue-300 mb-2">
-          ML advisory signal: {(mlProbability * 100).toFixed(0)}% susceptibility · rule engine remains authoritative
-        </p>
-      )}
 
       {isBlocked && route.blockReason && (
         <p className="text-xs text-red-400 mb-2">{route.blockReason}</p>

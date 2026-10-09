@@ -100,6 +100,7 @@ function reportContribution(
   for (const inc of incidents) {
     const isHardBlockSource = (HARD_BLOCK_SOURCES as readonly string[]).includes(inc.sourceType);
     const isHardBlockType = (HARD_BLOCK_TYPES as readonly string[]).includes(inc.type);
+    const isModeratorVerified = inc.status === 'verified';
     const isVerified = inc.status === 'verified' || inc.status === 'corroborated';
 
     // Hoist display strings — each replace allocates a new string
@@ -109,7 +110,7 @@ function reportContribution(
 
     const ageMinutes = (nowMs - new Date(inc.observedAt).getTime()) / 60_000;
 
-    if ((isHardBlockSource || isHardBlockType) && isVerified) {
+    if (isHardBlockSource || (isHardBlockType && isModeratorVerified)) {
       hardBlock = true;
       hardBlockReason = `Verified ${typeDisplay} from ${sourceDisplay}${demoTag}`;
       score = 100;

@@ -15,19 +15,35 @@
  *     type / sourceType guard is the real filter and lives in the reduce.
  */
 import { APIGatewayProxyHandlerV2 } from 'aws-lambda';
-import { ScanCommand, ScanCommandInput } from '@aws-sdk/client-dynamodb';
+import { ScanCommand, QueryCommand, ScanCommandInput } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
+import { encodeGeohash } from '@heatflood/shared';
 import { dynamoClient } from '../adapters/dynamodb';
 import { logger } from '../utils/logger';
 
 const client = dynamoClient;
 const INCIDENTS_TABLE = process.env.INCIDENTS_TABLE ?? 'heatflood-incidents';
 
+function getGeohashesForBbox(lngMin: number, latMin: number, lngMax: number, latMax: number): string[] {
+  const step = 0.03; // precision 5 cell width/height step (~4.9 km x 4.9 km)
+  const set = new Set<string>();
+  for (let lat = latMin; ; lat = Math.min(latMax, lat + step)) {
+    for (let lon = lngMin; ; lon = Math.min(lngMax, lon + step)) {
+      set.add(encodeGeohash(lat, lon, 5));
+      if (lon >= lngMax) break;
+    }
+    if (lat >= latMax) break;
+  }
+  return Array.from(set);
+}
+
 export const handler: APIGatewayProxyHandlerV2 = async (event) => {
   const bboxParam = event.queryStringParameters?.bbox;
   const now = new Date().toISOString();
 
   let lngMin = -180, latMin = -90, lngMax = 180, latMax = 90;
+  let isFilteredBbox = false;
+
   if (bboxParam) {
     const parts = bboxParam.split(',').map(Number);
     if (parts.length === 4 && parts.every(n => Number.isFinite(n))) {
@@ -39,6 +55,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
           body: JSON.stringify({ error: 'INVALID_BBOX', detail: 'bbox coordinates out of valid range' }),
         };
       }
+      isFilteredBbox = true;
     } else {
       return {
         statusCode: 400,
@@ -52,27 +69,54 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
 
   try {
     const rawItems: Record<string, import('@aws-sdk/client-dynamodb').AttributeValue>[] = [];
-    let lastEvaluatedKey: Record<string, import('@aws-sdk/client-dynamodb').AttributeValue> | undefined = undefined;
 
-    do {
-      const scanParams: ScanCommandInput = {
-        TableName: INCIDENTS_TABLE,
-        FilterExpression: 'expiresAt > :now AND #s <> :rejected AND #s <> :internal',
-        ExpressionAttributeNames: { '#s': 'status' },
-        ExpressionAttributeValues: {
-          ':now':      { S: now },
-          ':rejected': { S: 'rejected' },
-          ':internal': { S: '_internal' },
-        },
-        ExclusiveStartKey: lastEvaluatedKey,
-      };
-      const scanOutput = await client.send(new ScanCommand(scanParams));
+    if (isFilteredBbox) {
+      // Targeted GSI lookup over visible viewport geohashes — avoids O(N) full table scan
+      const targetGeohashes = getGeohashesForBbox(lngMin, latMin, lngMax, latMax);
+      const queryResults = await Promise.all(
+        targetGeohashes.map(gh =>
+          client.send(new QueryCommand({
+            TableName: INCIDENTS_TABLE,
+            IndexName: 'geohash-createdAt-index',
+            KeyConditionExpression: 'geohash = :gh',
+            FilterExpression: 'expiresAt > :now AND #s <> :rejected',
+            ExpressionAttributeNames: { '#s': 'status' },
+            ExpressionAttributeValues: {
+              ':gh': { S: gh },
+              ':now': { S: now },
+              ':rejected': { S: 'rejected' },
+            },
+          }))
+        )
+      );
 
-      if (scanOutput.Items?.length) {
-        rawItems.push(...scanOutput.Items);
+      for (const res of queryResults) {
+        if (res.Items?.length) {
+          rawItems.push(...res.Items);
+        }
       }
-      lastEvaluatedKey = scanOutput.LastEvaluatedKey;
-    } while (lastEvaluatedKey);
+    } else {
+      // Fallback for unbounded requests
+      let lastEvaluatedKey: Record<string, import('@aws-sdk/client-dynamodb').AttributeValue> | undefined = undefined;
+      do {
+        const scanParams: ScanCommandInput = {
+          TableName: INCIDENTS_TABLE,
+          FilterExpression: 'expiresAt > :now AND #s <> :rejected',
+          ExpressionAttributeNames: { '#s': 'status' },
+          ExpressionAttributeValues: {
+            ':now': { S: now },
+            ':rejected': { S: 'rejected' },
+          },
+          ExclusiveStartKey: lastEvaluatedKey,
+        };
+        const scanOutput = await client.send(new ScanCommand(scanParams));
+
+        if (scanOutput.Items?.length) {
+          rawItems.push(...scanOutput.Items);
+        }
+        lastEvaluatedKey = scanOutput.LastEvaluatedKey;
+      } while (lastEvaluatedKey);
+    }
 
     // Single O(n) pass: unmarshall + type-guard + bbox-filter + field-strip
     const incidents: Record<string, unknown>[] = [];

@@ -1,76 +1,68 @@
-# ML Integration Guide
+# ML Integration Guide — Day 5
 
-## What is implemented
+## Overview
 
-- XGBoost binary classifier with `rainfall-stress-v1` feature contract.
-- Bounded dataset preparation (`250,000` rows by default) to prevent multi-GB CSV expansion.
-- Chronological 65/15/20 train/validation/test split.
-- Local XGBoost training with early stopping and imbalance handling.
-- Local inference and metrics output.
-- SageMaker built-in XGBoost training/deployment/invocation helpers.
-- Lambda SageMaker Runtime adapter with an 800 ms application timeout and strict probability validation.
-- Deterministic fallback when SageMaker is disabled, unavailable, times out, or returns invalid output.
-- ML is an advisory/shadow signal only. Route ranking and hard safety decisions remain deterministic.
-- Verified closures/hazards always remain hard blocks even if ML returns a low probability.
+The SageMaker AI XGBoost integration is **optional and additive**. It adds a shadow signal to the explainability output. It does not change route ranking or override safety rules.
 
-## Scientific boundary
+## Day 5 checklist for Member C (ML)
 
-The current repository does not contain a timestamped, street-segment flood ground-truth dataset. Therefore the current training label is a **next-hour heavy-rain advisory**, not a claim of time-specific observed flooding. Do not present its ROC-AUC as flood-prediction accuracy.
+- [ ] Inspect dataset manifest and label quality
+- [ ] Define and document train/val/test time splits
+- [ ] Build feature CSV in `flood-segment-v1` column order (see `feature-schema-v1.md`)
+- [ ] Upload datasets to S3 bucket under `s3://heatflood-data/training/`
+- [ ] Train XGBoost baseline using SageMaker AI built-in XGBoost (CPU, not GPU)
+- [ ] Evaluate on held-out test set; record metrics in `docs/ml-results.md`
+- [ ] If evaluation passes go/no-go criteria, deploy a SageMaker real-time endpoint
+- [ ] Document endpoint name, feature version, expected latency and IAM requirements
+- [ ] Hand `SAGEMAKER_ENDPOINT_NAME` to Member A
 
-For a validated live flood predictor, replace the proxy label with timestamped trusted sensor or verified incident outcomes and evaluate with a temporal and, where possible, geographic holdout.
+## Go/no-go gate for live shadow integration
 
-## Local one-command validation
+Enable the endpoint in staging **only if all** of the following are true:
 
-From the repository root on Windows PowerShell:
+1. Labels are genuine observed outcomes (not derived from rainfall alone).
+2. Training and inference use identical feature schema (`flood-segment-v1`) and units.
+3. Evaluation is separated by time; a geographic holdout is used where feasible.
+4. Metrics are compared against the rule-based baseline on the same held-out cases.
+5. Endpoint timeout or error returns `{ available: false }` and the rule-based result is unchanged.
+6. Hard blocks and `NO_CONFIDENT_ROUTE` outcomes are not affected by the ML signal.
 
-```powershell
-.\scripts\ml\run-final.ps1
+## Day 5 checklist for Member A (backend)
+
+- [ ] Confirm `SAGEMAKER_ENABLED=false` in production
+- [ ] Enable in staging environment only
+- [ ] Set application timeout of 800 ms for `InvokeEndpoint` call
+- [ ] Validate response: `probability` must be a finite float in `[0, 1]`; `featureVersion` must match
+- [ ] Log signal alongside rule-based result for shadow evaluation
+- [ ] Test: disabled, timeout, endpoint error, malformed probability, version mismatch
+- [ ] Promote to production only after passing regression tests
+
+## Lambda integration point
+
+```
+analyseTrip(request)
+  → fetch routes from Mapbox
+  → fetch weather from Open-Meteo
+  → load active incidents and hotspots from DynamoDB
+  → segment routes and estimate arrival times
+  → calculate rule-based floodRisk, heatRisk, confidence per segment
+  → if SAGEMAKER_ENABLED:
+       call mlProvider.predict(versionedFeatures)
+       validate response; on failure set available=false
+  → apply hard safety rules (verified closures block regardless of ML)
+  → rank eligible routes using rule-based scores only
+  → return routes + reasons + mlSignal + freshness
 ```
 
-This installs Python dependencies, downloads NASA POWER weather if needed, builds the bounded dataset, trains XGBoost, runs local inference, then runs TypeScript typecheck and the unit test suite.
+## IAM requirements for SageMaker endpoint invocation
 
-## SageMaker deployment
-
-Configure AWS credentials and these environment variables:
-
-```powershell
-$env:ML_S3_BUCKET = "your-training-bucket"
-$env:ML_SAGEMAKER_ROLE_ARN = "arn:aws:iam::<account>:role/<sagemaker-role>"
-$env:ML_SAGEMAKER_ENDPOINT = "heatflood-rainfall-stress-v1"
-$env:AWS_REGION = "ap-south-1"
+The Lambda execution role needs:
+```json
+{
+  "Effect": "Allow",
+  "Action": "sagemaker:InvokeEndpoint",
+  "Resource": "arn:aws:sagemaker:<region>:<account>:endpoint/<endpoint-name>"
+}
 ```
 
-Then:
-
-```powershell
-.\scripts\ml\deploy-sagemaker.ps1
-```
-
-The training script uploads train/validation/test CSVs, starts a SageMaker XGBoost training job, and prints the resulting `MODEL_DATA` S3 URI. Review that URI before deploying the endpoint.
-
-After deployment, configure the Lambda environment:
-
-```text
-SAGEMAKER_ENABLED=true
-SAGEMAKER_ENDPOINT_NAME=heatflood-rainfall-stress-v1
-ML_MODEL_VERSION=xgb-rainfall-stress-v1
-ML_TIMEOUT_MS=800
-```
-
-The Lambda execution role needs only `sagemaker:InvokeEndpoint` for the specific endpoint.
-
-## Safety contract
-
-```text
-Verified closure / hard hazard
-            ↓
-          BLOCK
-            ↓
-Deterministic flood + heat + confidence engine
-            ↓
-      Optional ML signal
-            ↓
-      Route ranking / UI
-```
-
-ML must never convert a hard-blocked route into a viable route.
+Add this only after the endpoint is created. Do not add broad SageMaker permissions to the production Lambda.

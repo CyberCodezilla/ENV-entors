@@ -6,7 +6,7 @@
 // ---------------------------------------------------------------------------
 // Pilot zone bounding box [lng_min, lat_min, lng_max, lat_max]
 // ---------------------------------------------------------------------------
-export const PILOT_BBOX = [72.82, 19.1, 72.87, 19.145] as const;
+export const PILOT_BBOX = [72.81, 19.09, 72.88, 19.15] as const;
 
 // ---------------------------------------------------------------------------
 // Risk score thresholds (0–100)
@@ -130,6 +130,6 @@ export const ROUTE_DISCLAIMER =
 // ---------------------------------------------------------------------------
 // ML
 // ---------------------------------------------------------------------------
-export const ML_FEATURE_VERSION = 'rainfall-stress-v1' as const;
+export const ML_FEATURE_VERSION = process.env.ML_FEATURE_VERSION ?? 'flood-susceptibility-v2';
 export const ML_TIMEOUT_MS = 800;
 export const SAGEMAKER_ENABLED = process.env.SAGEMAKER_ENABLED === 'true';

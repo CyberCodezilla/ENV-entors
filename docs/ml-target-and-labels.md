@@ -1,29 +1,42 @@
 # ML Target and Label Definition
 
-## Production-safe ML target
+## What the model predicts
 
-The bundled model predicts **whether the next hourly weather interval will receive at least 10 mm of rain**.
+A binary classification: **was waterlogging actively observed at this route segment during the 60-minute window covering the expected arrival time?**
 
-- `label = 1`: observed rainfall in the next hourly interval is >= 10 mm.
-- `label = 0`: observed rainfall in the next hourly interval is < 10 mm.
-- The target is shifted one hour forward, so the model only sees information available at prediction time.
+- `label = 1`: A moderator-verified incident report, trusted sensor reading, or official closure marked the segment as waterlogged / impassable during the target window.
+- `label = 0`: No such evidence was recorded for that segment and window.
 
-This is a real historical-weather forecasting task. It is **not** a claim that the model predicts street flooding.
+## What the model does NOT predict
 
-## Leakage controls
+- That a route is "safe."
+- The depth of water.
+- Whether a specific person will experience flooding.
+- The accuracy of unverified community reports.
 
-- No hotspot-derived features are supplied to the model.
-- The target is one hour ahead of the feature timestamp.
-- Train/validation/test are chronological (65/15/20).
-- Threshold selection is performed on validation only.
-- Test metrics are reported once on the untouched chronological test set.
+## Data provenance checklist (fill before Day 5 training)
 
-## How the ML signal is used
+- [ ] Source name and URL for each labelled row
+- [ ] Geographic coordinate and precision of each observation
+- [ ] Observation timestamp and time zone (must be UTC)
+- [ ] Label assigned by: sensor / moderator / official / synthetic
+- [ ] Licence or permission for this use
+- [ ] Class counts: positive (flooded) vs negative rows
+- [ ] Train / validation / test date ranges
+- [ ] Location holdout area (if feasible)
+- [ ] Features confirmed available at `predictionTimeUtc` (no leakage)
 
-The model is an advisory **rainfall-stress signal**. The deterministic flood engine remains the final route decision-maker. Verified flooding, closures, and hard blocks cannot be overridden by ML.
+## If genuine labels are unavailable
 
-The ML probability must not be described as flood probability, route safety probability, or street-water depth prediction.
+If no verified segment-level waterlogging outcomes exist, **do not fabricate labels from weather data alone**. Instead:
+1. Document the data gap clearly.
+2. Run SageMaker as a pipeline experiment with synthetic labels.
+3. Present as "experimental infrastructure," not a validated flood predictor.
+4. The rule-based engine remains the production decision-maker.
 
-## If verified flood labels become available
+## Baseline to beat
 
-The next model iteration can replace this rainfall target with timestamped segment-level flood outcomes from moderator-verified reports, trusted sensors, or official closures. At that point, a dedicated flood model can be evaluated against the same chronological and spatial holdouts.
+Before deploying any ML signal, the XGBoost precision/recall on held-out data must be compared against the rule-based engine on the same cases. Report:
+- Precision and recall (especially missed hazardous events — false negatives matter more than false positives here).
+- Accuracy is insufficient when flooding is rare (class imbalance).
+- If the model does not improve on at least one key metric, do not promote to staging.

@@ -47,15 +47,15 @@ playwright-report/
 
 # Data files with personal or sensitive content
 data/private/
-
-# ML generated artifacts / virtualenvs
+# Python pycache & bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
 ml/.venv/
-ml/artifacts/**/*.json
-ml/artifacts/**/*.model
-ml/artifacts/**/*.ubj
-ml/data/raw/*.csv
-ml/data/processed/*.parquet
-ml/data/raw/
-ml/data/processed/
-ml/data/sagemaker/
-ml/artifacts/
+ml/data/model/
+ml/data/mumbai_weather.csv
+
+# Generated build files
+apps/web/src/app/tailwind-built.css
+

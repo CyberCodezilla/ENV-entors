@@ -16,8 +16,14 @@ let cacheLoadedAt: number | null = null;
 export async function getHotspots(): Promise<FloodHotspot[]> {
   const now = Date.now();
   if (cacheLoadedAt === null || now - cacheLoadedAt > CACHE_TTL_MS) {
-    cachedHotspots = await fetchAllHotspots();
-    cacheLoadedAt = now;
+    const fresh = await fetchAllHotspots();
+    if (fresh.length > 0) {
+      cachedHotspots = fresh;
+      cacheLoadedAt = now;
+    } else if (cachedHotspots.length === 0) {
+      // Avoid locking in empty cache on cold start failure
+      cacheLoadedAt = null;
+    }
   }
   return cachedHotspots;
 }

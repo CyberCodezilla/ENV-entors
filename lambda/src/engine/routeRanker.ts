@@ -24,6 +24,8 @@ import {
   CONFIDENCE_THRESHOLDS,
   RiskLevelSchema,
   ConfidenceLevelSchema,
+  scoreToLevel,
+  confidenceLevelFromScore,
 } from '@heatflood/shared';
 import type { z } from 'zod';
 
@@ -36,19 +38,6 @@ export interface RawRoute {
   durationSec: number;
   geometry: { type: 'LineString'; coordinates: [number, number][] };
   segments: SegmentAssessment[];
-}
-
-function riskLevelFromScore(score: number): RiskLevel {
-  if (score <= RISK_THRESHOLDS.low) return 'low';
-  if (score <= RISK_THRESHOLDS.moderate) return 'moderate';
-  if (score <= RISK_THRESHOLDS.high) return 'high';
-  return 'blocked';
-}
-
-function confidenceLevelFromScore(score: number): ConfidenceLevel {
-  if (score <= CONFIDENCE_THRESHOLDS.limited) return 'limited';
-  if (score <= CONFIDENCE_THRESHOLDS.moderate) return 'moderate';
-  return 'good';
 }
 
 /** Distance-weighted average — O(n), single pass. */
@@ -82,9 +71,7 @@ export function rankRoutes(rawRoutes: RawRoute[]): {
 
     for (let i = 0; i < n; i++) {
       const s = segs[i];
-      const { lon: lon1, lat: lat1 } = s.startCoord;
-      const { lon: lon2, lat: lat2 } = s.endCoord;
-      const w = Math.sqrt((lon2 - lon1) ** 2 + (lat2 - lat1) ** 2);
+      const w = s.segmentLengthM;
 
       floodRisks[i] = s.floodRisk;
       heatRisks[i] = s.heatRisk;
@@ -128,8 +115,8 @@ export function rankRoutes(rawRoutes: RawRoute[]): {
       maxFloodRisk,
       weightedFloodExposure: weightedFlood,
       weightedHeatExposure: weightedHeat,
-      overallFloodLevel: riskLevelFromScore(maxFloodRisk),
-      overallHeatLevel: riskLevelFromScore(weightedHeat),
+      overallFloodLevel: scoreToLevel(maxFloodRisk),
+      overallHeatLevel: scoreToLevel(weightedHeat),
       overallConfidenceLevel: confidenceLevelFromScore(minConfidence),
 
       isHardBlocked: anyHardBlock,

@@ -56,11 +56,11 @@ interface Props {
 }
 
 const INCIDENT_ICONS: Record<string, string> = {
-  waterlogging: '\uD83D\uDCA7',
-  road_blocked: '\uD83D\uDEA7',
-  underpass_flooded: '\uD83C\uDF0A',
-  extreme_heat: '\uD83D\uDD25',
-  other: '\u26A0\uFE0F',
+  waterlogging: '💧',
+  road_blocked: '🚧',
+  underpass_flooded: '🌊',
+  extreme_heat: '🔥',
+  other: '⚠️',
 };
 
 export function Map({ routes, selectedRouteId, incidents, onBboxChange, onRequestReport }: Props) {
@@ -122,6 +122,8 @@ export function Map({ routes, selectedRouteId, incidents, onBboxChange, onReques
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
+
+    const eventCleanups: Array<() => void> = [];
 
     // Cleanup
     map.getStyle()?.layers?.forEach(l => {
@@ -194,7 +196,7 @@ export function Map({ routes, selectedRouteId, incidents, onBboxChange, onReques
           paint: { 'line-color': '#ffffff', 'line-width': 20, 'line-opacity': 0 }, // invisible hit area
         });
 
-        map.on('mousemove', segHoverId, (e) => {
+        const onMouseMove = (e: mapboxgl.MapLayerMouseEvent) => {
           const props = e.features?.[0]?.properties;
           if (!props) return;
           setTooltip({
@@ -214,10 +216,19 @@ export function Map({ routes, selectedRouteId, incidents, onBboxChange, onReques
             y: e.originalEvent.clientY,
           });
           map.getCanvas().style.cursor = 'crosshair';
-        });
-        map.on('mouseleave', segHoverId, () => {
+        };
+
+        const onMouseLeave = () => {
           setTooltip(null);
           map.getCanvas().style.cursor = '';
+        };
+
+        map.on('mousemove', segHoverId, onMouseMove);
+        map.on('mouseleave', segHoverId, onMouseLeave);
+
+        eventCleanups.push(() => {
+          map.off('mousemove', segHoverId, onMouseMove);
+          map.off('mouseleave', segHoverId, onMouseLeave);
         });
       });
     });
@@ -233,6 +244,10 @@ export function Map({ routes, selectedRouteId, incidents, onBboxChange, onReques
         { padding: 60, maxZoom: 15, duration: 800 }
       );
     }
+
+    return () => {
+      eventCleanups.forEach(fn => fn());
+    };
   }, [routes, selectedRouteId, ready]);
 
   // ---- Incident markers ----
@@ -280,7 +295,7 @@ export function Map({ routes, selectedRouteId, incidents, onBboxChange, onReques
       <div ref={containerRef} className="w-full h-full" />
       {!ready && (
         <div className="absolute inset-0 flex items-center justify-center bg-gray-900 text-gray-500 text-sm">
-          Loading map\u2026
+          Loading map…
         </div>
       )}
       <MapLegend />

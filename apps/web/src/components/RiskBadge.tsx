@@ -15,7 +15,7 @@ interface Props {
 
 export function RiskBadge({ level, type, score, small = false }: Props) {
   const colors = RISK_COLORS[level] ?? RISK_COLORS.low;
-  const icon = type === 'flood' ? '\uD83D\uDCA7' : '\uD83C\uDF21\uFE0F';
+  const icon = type === 'flood' ? '💧' : '🌡️';
   const sizeClass = small ? 'text-xs px-2 py-0.5' : 'text-sm px-3 py-1';
 
   return (

@@ -1,7 +1,11 @@
 /**
  * HeatFlood Guardian — ML risk types and provider interface.
  *
- * SageMaker integration is optional. The disabled provider remains the default when the endpoint flag is off, while the Lambda adapter can supply a real SageMaker provider when enabled.
+ * SageMaker integration is out of scope for the 5-day sprint.
+ * The DisabledMlRiskProvider is the sole implementation and always
+ * returns { available: false }. The interface is retained so a
+ * SageMakerMlRiskProvider can be dropped in post-hackathon without
+ * changing any calling code in segmentScorer.
  *
  * Perf note (optimised):
  *   - DisabledMlRiskProvider.predict() was async, causing a Promise
@@ -34,8 +38,8 @@ export interface FloodSegmentFeaturesV1 {
   newest_report_age_min: number | null;
 
   // Temporal
-  hour_of_day: number;   // 0–23 UTC
-  day_of_week: number;   // 0=Monday, 6=Sunday
+  hour_of_day: number;   // 0–23 IST
+  day_of_week: number;   // 0=Monday
   month: number;         // 1–12
 
   // Location (categorical)

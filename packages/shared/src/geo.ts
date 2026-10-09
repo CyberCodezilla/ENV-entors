@@ -34,25 +34,6 @@ export function haversineDistanceM(
   return 2 * EARTH_RADIUS_M * Math.asin(Math.sqrt(a));
 }
 
-/**
- * Returns the minimum distance (in metres) from point P to the line segment AB.
- * Uses planar approximation (valid for short segments < 500 m).
- */
-export function pointToSegmentDistanceM(
-  pLat: number, pLon: number,
-  aLat: number, aLon: number,
-  bLat: number, bLon: number,
-): number {
-  const dx = bLon - aLon;
-  const dy = bLat - aLat;
-  const lenSq = dx * dx + dy * dy;
-  if (lenSq === 0) return haversineDistanceM(pLat, pLon, aLat, aLon);
-
-  const t = Math.max(0, Math.min(1, ((pLon - aLon) * dx + (pLat - aLat) * dy) / lenSq));
-  const closestLat = aLat + t * dy;
-  const closestLon = aLon + t * dx;
-  return haversineDistanceM(pLat, pLon, closestLat, closestLon);
-}
 
 /**
  * Split a GeoJSON LineString into segments no longer than maxLengthM.

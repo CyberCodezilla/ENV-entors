@@ -2,7 +2,7 @@
   "name": "heatflood-guardian",
   "version": "0.1.0",
   "private": true,
-  "description": "HeatFlood Guardian \u2014 monorepo root",
+  "description": "HeatFlood Guardian — monorepo root",
   "workspaces": [
     "packages/*",
     "apps/*",
@@ -15,11 +15,7 @@
     "test": "vitest run tests/unit",
     "test:watch": "vitest",
     "lint": "eslint . --ext .ts,.tsx",
-    "deploy:backend": "cd infrastructure && sam build && sam deploy",
-    "ml:install": "cd ml && python -m pip install -r requirements.txt",
-    "ml:train": "cd ml && python src/fetch_real_data.py --out data/raw/mumbai_weather.csv && python src/prepare_dataset.py --weather data/raw/mumbai_weather.csv --hotspots ../data/hotspots.json --out data/processed/dataset.csv && python src/train_local.py --data data/processed/dataset.csv --out artifacts/xgb",
-    "ml:validate": "powershell -ExecutionPolicy Bypass -File scripts/ml/run-final.ps1",
-    "ml:smoke": "powershell -ExecutionPolicy Bypass -File scripts/ml/smoke-test.ps1"
+    "deploy:backend": "cd infrastructure && sam build && sam deploy"
   },
   "devDependencies": {
     "typescript": "^5.4.0",
