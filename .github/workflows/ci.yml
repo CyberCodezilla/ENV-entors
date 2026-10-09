@@ -1,134 +1,150 @@
 name: CI/CD Pipeline
 
 on:
-push:
-branches:
-- main
-- dev
-pull_request:
-branches:
-- main
-- dev
+  push:
+    branches:
+      - main
+      - dev
+  pull_request:
+    branches:
+      - main
+      - dev
 
 jobs:
-validate:
-name: Validate and Test
-runs-on: ubuntu-latest
+  validate:
+    name: Validate and Test
+    runs-on: ubuntu-latest
 
-steps:
-  - name: Checkout Code
-    uses: actions/checkout@v4
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-  - name: Setup Node.js
-    uses: actions/setup-node@v4
-    with:
-      node-version: '20'
-      cache: npm
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
 
-  - name: Setup Python
-    uses: actions/setup-python@v5
-    with:
-      python-version: '3.11'
-      cache: pip
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
 
-  - name: Install Node Dependencies
-    run: npm ci
+      - name: Install Node Dependencies
+        run: npm ci
 
-  - name: Install Python Dependencies
-    run: pip install -r ml/requirements.txt
+      - name: Install Python Dependencies
+        run: pip install -r ml/requirements.txt
 
-  - name: Build Lambda Code
-    run: npm run build --workspace=lambda
+      - name: Build Lambda Code
+        run: npm run build --workspace=lambda
 
-  - name: Run TypeScript Typecheck
-    run: npm run typecheck --workspaces
+      - name: Run TypeScript Typecheck
+        run: npm run typecheck --workspaces
 
-  - name: Run Vitest Unit Tests
-    run: npx vitest run tests/unit
+      - name: Run Vitest Unit Tests
+        run: npx vitest run tests/unit
 
-  - name: Run Python ML Tests
-    run: |
-      export PYTHONPATH=ml
-      pytest ml/tests
+      - name: Run Python ML Tests
+        run: |
+          export PYTHONPATH=ml
+          pytest ml/tests
 
-build-frontend:
-name: Build Frontend
-runs-on: ubuntu-latest
-if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  build-frontend:
+    name: Build Frontend
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
-steps:
-  - name: Checkout Code
-    uses: actions/checkout@v4
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-  - name: Setup Node.js
-    uses: actions/setup-node@v4
-    with:
-      node-version: '20'
-      cache: npm
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
 
-  - name: Install Node Dependencies
-    run: npm ci
+      - name: Install Node Dependencies
+        run: npm ci
 
-  - name: Build Frontend App
-    run: npm run build --workspace=apps/web
+      - name: Build Frontend App
+        run: npm run build --workspace=apps/web
 
-  - name: Upload Frontend Build
-    uses: actions/upload-artifact@v4
-    with:
-      name: frontend-build
-      path: apps/web/out
-      if-no-files-found: error
+      - name: Upload Frontend Build
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: apps/web/out
+          if-no-files-found: error
 
-deploy:
-name: Deploy to AWS
-runs-on: ubuntu-latest
-needs:
-- validate
-- build-frontend
-if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  deploy:
+    name: Deploy to AWS
+    runs-on: ubuntu-latest
+    needs:
+      - validate
+      - build-frontend
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
-steps:
-  - name: Checkout Code
-    uses: actions/checkout@v4
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-  - name: Download Frontend Build
-    uses: actions/download-artifact@v4
-    with:
-      name: frontend-build
-      path: apps/web/out
+      - name: Download Frontend Build
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-build
+          path: apps/web/out
 
-  - name: Configure AWS Credentials
-    uses: aws-actions/configure-aws-credentials@v4
-    with:
-      aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      aws-region: ap-south-1
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-south-1
 
-  - name: Setup AWS SAM CLI
-    uses: aws-actions/setup-sam@v2
+      - name: Setup AWS SAM CLI
+        uses: aws-actions/setup-sam@v2
 
-  - name: Validate SAM Infrastructure Template
-    run: sam validate -t infrastructure/template.yaml
+      - name: Validate SAM Template
+        run: sam validate -t infrastructure/template.yaml
 
-  - name: Build and Deploy SAM Backend
-    run: |
-      cd infrastructure
-      sam build
-      sam deploy \
-        --stack-name heatflood-guardian \
-        --region ap-south-1 \
-        --capabilities CAPABILITY_IAM \
-        --resolve-s3 \
-        --no-confirm-changeset \
-        --no-fail-on-empty-changeset \
-        --parameter-overrides Stage=prod AllowedOrigins="*"
+      - name: Deploy Backend
+        run: |
+          cd infrastructure
+          sam build
+          sam deploy \
+            --stack-name heatflood-guardian \
+            --region ap-south-1 \
+            --capabilities CAPABILITY_IAM \
+            --resolve-s3 \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides Stage=prod AllowedOrigins="*"
 
-  - name: Deploy Frontend to S3 and Invalidate CloudFront
-    run: |
-      DIST_ID=$(aws cloudfront list-distributions --query "DistributionList.Items[?Comment=='HeatFlood Frontend Distribution' || contains(Origins.Items[0].DomainName, 'heatflood-frontend')].Id | [0]" --output text)
-      BUCKET_NAME=$(aws cloudformation describe-stacks --stack-name heatflood-guardian --query "Stacks[0].Outputs[?OutputKey=='FrontendBucketName'].OutputValue" --output text)
-      test -n "$BUCKET_NAME" && test "$BUCKET_NAME" != "None"
-      aws s3 sync apps/web/out "s3://$BUCKET_NAME" --delete
-      if [ "$DIST_ID" != "None" ] && [ -n "$DIST_ID" ]; then
-        aws cloudfront create-invalidation --distribution-id "$DIST_ID" --paths "/*"
-      fi
+      - name: Deploy Frontend to S3
+        run: |
+          BUCKET_NAME=$(aws cloudformation describe-stacks \
+            --stack-name heatflood-guardian \
+            --query "Stacks[0].Outputs[?OutputKey=='FrontendBucketName'].OutputValue" \
+            --output text)
+
+          if [ -z "$BUCKET_NAME" ] || [ "$BUCKET_NAME" = "None" ]; then
+            echo "Frontend bucket not found"
+            exit 1
+          fi
+
+          aws s3 sync apps/web/out "s3://$BUCKET_NAME" --delete
+
+      - name: Invalidate CloudFront Cache
+        run: |
+          DIST_ID=$(aws cloudfront list-distributions \
+            --query "DistributionList.Items[?Comment=='HeatFlood Frontend Distribution' || contains(Origins.Items[0].DomainName, 'heatflood-frontend')].Id | [0]" \
+            --output text)
+
+          if [ -n "$DIST_ID" ] && [ "$DIST_ID" != "None" ]; then
+            aws cloudfront create-invalidation \
+              --distribution-id "$DIST_ID" \
+              --paths "/*"
+          fi
