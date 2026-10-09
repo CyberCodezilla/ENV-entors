@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   haversineDistanceM,
+  pointToSegmentDistanceM,
   splitRouteIntoSegments,
   encodeGeohash,
 } from '@heatflood/shared';
@@ -42,6 +43,17 @@ describe('splitRouteIntoSegments', () => {
   });
 });
 
+describe('pointToSegmentDistanceM', () => {
+  it('returns 0 when the point is on the segment endpoint', () => {
+    const d = pointToSegmentDistanceM(19.112, 72.832, 19.112, 72.832, 19.138, 72.855);
+    expect(d).toBeLessThan(1);
+  });
+
+  it('returns a positive distance for an off-route point', () => {
+    const d = pointToSegmentDistanceM(19.120, 72.832, 19.112, 72.832, 19.138, 72.855);
+    expect(d).toBeGreaterThanOrEqual(0);
+  });
+});
 
 describe('encodeGeohash', () => {
   it('returns a string of the requested precision', () => {

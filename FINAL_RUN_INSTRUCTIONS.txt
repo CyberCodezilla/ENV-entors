@@ -1,0 +1,11 @@
+HEATFLOOD GUARDIAN - FINAL RUN
+
+Run from PowerShell:
+  cd "$env:USERPROFILE\Downloads\HeatFlood-Guardian-FINAL-v3\aws-env-main"
+  Unblock-File .\RUN_FINAL.ps1
+  powershell -ExecutionPolicy Bypass -File .\RUN_FINAL.ps1
+
+Or double-click RUN_FINAL.cmd.
+
+The runner creates ml\.venv before using its Python executable and uses a non-reserved
+PowerShell argument variable, so it will not accidentally open the interactive Python shell.

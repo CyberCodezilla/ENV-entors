@@ -4,7 +4,6 @@
  * Validated with Zod at both API Gateway entry and frontend API client.
  */
 import { z } from 'zod';
-import { PILOT_BBOX } from './constants';
 
 // ---------------------------------------------------------------------------
 // Primitives
@@ -205,8 +204,8 @@ export type AnalyseRoutesResponse = z.infer<typeof AnalyseRoutesResponseSchema>;
 // ---------------------------------------------------------------------------
 
 export const CreateIncidentRequestSchema = z.object({
-  latitude: z.number().min(PILOT_BBOX[1]).max(PILOT_BBOX[3]),
-  longitude: z.number().min(PILOT_BBOX[0]).max(PILOT_BBOX[2]),
+  latitude: z.number().min(19.09).max(19.15),
+  longitude: z.number().min(72.81).max(72.88),
   type: IncidentTypeSchema,
   depthCategory: DepthCategorySchema.optional().default('unknown'),
   observedAt: z.string().datetime({ offset: true }),

@@ -24,7 +24,7 @@ const client = dynamoClient;
 const INCIDENTS_TABLE = process.env.INCIDENTS_TABLE ?? 'heatflood-incidents';
 const HOTSPOTS_TABLE = process.env.HOTSPOTS_TABLE ?? 'heatflood-hotspots';
 
-export function getGeohashNeighbors5(lat: number, lon: number): string[] {
+function getGeohashNeighbors5(lat: number, lon: number): string[] {
   const dLat = 0.035;
   const dLon = 0.035;
   const hashes = new Set<string>();
@@ -76,55 +76,6 @@ export async function fetchNearbyIncidents(
     }
   } catch (err) {
     logger.warn('DynamoDB fetchNearbyIncidents failed', { err, lat, lon });
-  }
-
-  return Array.from(incidentMap.values());
-}
-
-/**
- * Fetch active incidents across multiple sample points, deduplicating geohashes
- * to minimize DynamoDB QueryCommand calls.
- */
-export async function fetchIncidentsForPoints(
-  points: Array<{ lat: number; lon: number }>,
-): Promise<ActiveIncident[]> {
-  const geohashSet = new Set<string>();
-  for (const p of points) {
-    const neighbors = getGeohashNeighbors5(p.lat, p.lon);
-    for (const gh of neighbors) {
-      geohashSet.add(gh);
-    }
-  }
-
-  const now = new Date().toISOString();
-  const incidentMap = new Map<string, ActiveIncident>();
-
-  try {
-    const results = await Promise.all(
-      Array.from(geohashSet).map(gh =>
-        client.send(new QueryCommand({
-          TableName: INCIDENTS_TABLE,
-          IndexName: 'geohash-createdAt-index',
-          KeyConditionExpression: 'geohash = :gh',
-          FilterExpression: 'expiresAt > :now AND #s <> :rejected',
-          ExpressionAttributeNames: { '#s': 'status' },
-          ExpressionAttributeValues: {
-            ':gh': { S: gh },
-            ':now': { S: now },
-            ':rejected': { S: 'rejected' },
-          },
-        }))
-      )
-    );
-
-    for (const res of results) {
-      for (const item of res.Items ?? []) {
-        const inc = unmarshall(item) as ActiveIncident;
-        incidentMap.set(inc.incidentId, inc);
-      }
-    }
-  } catch (err) {
-    logger.warn('DynamoDB fetchIncidentsForPoints failed', { err });
   }
 
   return Array.from(incidentMap.values());

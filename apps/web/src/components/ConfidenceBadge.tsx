@@ -18,7 +18,7 @@ export function ConfidenceBadge({ level, score, showExplainer = false }: Props) 
 
   return (
     <span className={`inline-flex items-center gap-1 text-xs font-medium ${colors.text}`}>
-      <span>📊</span>
+      <span>\uD83D\uDCCA</span>
       <span>{colors.label}</span>
       {score !== undefined && <span className="opacity-60">({score})</span>}
       {showExplainer && level === 'limited' && (

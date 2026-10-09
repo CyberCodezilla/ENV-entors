@@ -20,7 +20,8 @@ import {
 import { calculateFloodRisk, ActiveIncident, FloodHotspot } from './floodRisk';
 import { calculateHeatRisk } from './heatRisk';
 import { calculateConfidence } from './confidence';
-import { DisabledMlRiskProvider, MlRiskProvider } from '@heatflood/shared';
+import { DisabledMlRiskProvider, MlRiskProvider, SAGEMAKER_ENABLED } from '@heatflood/shared';
+import { SageMakerMlRiskProvider } from '../adapters/sagemaker';
 
 export interface SegmentInput {
   segmentIndex: number;
@@ -49,7 +50,7 @@ export interface SegmentInput {
   mlProvider?: MlRiskProvider;
 }
 
-const DEFAULT_ML = new DisabledMlRiskProvider();
+const DEFAULT_ML = SAGEMAKER_ENABLED ? new SageMakerMlRiskProvider() : new DisabledMlRiskProvider();
 
 export async function scoreSegment(input: SegmentInput): Promise<SegmentAssessment> {
   const midLat = (input.startCoord.lat + input.endCoord.lat) / 2;
@@ -107,6 +108,17 @@ export async function scoreSegment(input: SegmentInput): Promise<SegmentAssessme
       }, Infinity)
     : null;
 
+  // --- Confidence ---
+  const confidence = calculateConfidence({
+    weatherAgeMinutes: input.weatherAgeMinutes,
+    incidentCount: input.nearbyIncidents.length,
+    verifiedIncidentCount: verifiedIncidents.length,
+    oldestIncidentAgeMinutes,
+    hotspotDataAvailable: input.nearbyHotspots.length > 0,
+    conflictingReports: false,
+    mlAvailable: false,
+  });
+
   // --- ML signal ---
   // Skip the Promise.race + setTimeout entirely for DisabledMlRiskProvider
   // (saves ~0.1 ms per segment × N segments × M routes)
@@ -138,7 +150,7 @@ export async function scoreSegment(input: SegmentInput): Promise<SegmentAssessme
           verified_report_count: verifiedIncidents.length,
           newest_report_age_min: newestIncidentAgeMin,
           hour_of_day: arrivalDate.getUTCHours(),
-          day_of_week: arrivalDate.getUTCDay(),
+          day_of_week: (arrivalDate.getUTCDay() + 6) % 7,
           month: arrivalDate.getUTCMonth() + 1,
           location_geohash5: encodeGeohash(midLat, midLon, 5),
         }),
@@ -155,16 +167,16 @@ export async function scoreSegment(input: SegmentInput): Promise<SegmentAssessme
     }
   }
 
-  // --- Confidence ---
-  const confidence = calculateConfidence({
-    weatherAgeMinutes: input.weatherAgeMinutes,
-    incidentCount: input.nearbyIncidents.length,
-    verifiedIncidentCount: verifiedIncidents.length,
-    oldestIncidentAgeMinutes,
-    hotspotDataAvailable: input.nearbyHotspots.length > 0,
-    conflictingReports: false,
-    mlAvailable: mlSignal.available,
-  });
+  // Bounded ML overlay: rainfall-stress probability can add at most 8 points.
+  // It is advisory only and can never create/clear a hard block.
+  const mlAdjustment = !flood.hardBlock && mlSignal.available && typeof mlSignal.probability === 'number'
+    ? Math.round(8 * mlSignal.probability)
+    : 0;
+  const finalFloodScore = Math.min(100, flood.score + mlAdjustment);
+  const finalFloodLevel = finalFloodScore <= 25 ? 'low' : finalFloodScore <= 50 ? 'moderate' : finalFloodScore <= 75 ? 'high' : 'blocked';
+  const mlReason = mlAdjustment > 0
+    ? `ML rainfall-stress advisory: +${mlAdjustment}/8`
+    : null;
 
   return {
     segmentIndex: input.segmentIndex,
@@ -173,18 +185,18 @@ export async function scoreSegment(input: SegmentInput): Promise<SegmentAssessme
     estimatedArrivalUtc: arrivalDate.toISOString(),
     segmentLengthM: input.segmentLengthM,
 
-    floodRisk: flood.score,
+    floodRisk: finalFloodScore,
     heatRisk: heat.score,
     confidence: confidence.score,
     hardBlock: flood.hardBlock,
     hardBlockReason: flood.hardBlockReason,
 
-    floodRiskLevel: flood.level,
+    floodRiskLevel: finalFloodLevel as typeof flood.level,
     heatRiskLevel: heat.level,
     confidenceLevel: confidence.level,
 
     evidence: flood.evidence,
-    reasons: [...flood.reasons, ...heat.reasons, ...confidence.reasons],
+    reasons: [...flood.reasons, ...(mlReason ? [mlReason] : []), ...heat.reasons, ...confidence.reasons],
 
     mlSignal,
   };

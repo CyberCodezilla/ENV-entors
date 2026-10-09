@@ -102,3 +102,59 @@ describe('scoreSegment — confidence', () => {
     expect(['good', 'moderate']).toContain(result.confidenceLevel);
   });
 });
+
+
+describe('scoreSegment — ML safety boundary', () => {
+  it('keeps deterministic hard blocks even when ML reports low susceptibility', async () => {
+    const result = await scoreSegment({
+      ...BASE,
+      mlProvider: {
+        predict: () => ({
+          available: true,
+          probability: 0.02,
+          modelVersion: 'test-model',
+          featureVersion: 'rainfall-stress-v1',
+          predictedAt: new Date().toISOString(),
+        }),
+      },
+      nearbyIncidents: [{
+        incidentId: 'closure-ml-test',
+        latitude: 19.1125,
+        longitude: 72.8325,
+        type: 'road_blocked',
+        depthCategory: 'vehicle_impassable',
+        status: 'verified',
+        sourceType: 'official_closure',
+        observedAt: new Date().toISOString(),
+        isDemo: false,
+      }],
+    });
+
+    expect(result.hardBlock).toBe(true);
+    expect(result.floodRisk).toBe(100);
+    expect(result.mlSignal?.available).toBe(true);
+    expect(result.mlSignal?.probability).toBe(0.02);
+  });
+
+  it('accepts an ML signal without changing the deterministic flood score', async () => {
+    const baseline = await scoreSegment({ ...BASE });
+    const withMl = await scoreSegment({
+      ...BASE,
+      mlProvider: {
+        predict: () => ({
+          available: true,
+          probability: 0.99,
+          modelVersion: 'test-model',
+          featureVersion: 'rainfall-stress-v1',
+          predictedAt: new Date().toISOString(),
+        }),
+      },
+    });
+
+    expect(withMl.mlSignal?.available).toBe(true);
+    expect(withMl.mlSignal?.probability).toBe(0.99);
+    expect(withMl.floodRisk).toBeGreaterThanOrEqual(baseline.floodRisk);
+    expect(withMl.floodRisk - baseline.floodRisk).toBeLessThanOrEqual(8);
+    expect(withMl.heatRisk).toBe(baseline.heatRisk);
+  });
+});

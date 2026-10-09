@@ -29,13 +29,12 @@ import {
 import {
   DynamoDBClient,
   PutItemCommand,
-  GetItemCommand,
   QueryCommand,
   ConditionalCheckFailedException,
 } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import { v4 as uuidv4 } from 'uuid';
-import { dynamoClient, getGeohashNeighbors5 } from '../adapters/dynamodb';
+import { dynamoClient } from '../adapters/dynamodb';
 import { logger } from '../utils/logger';
 
 const client = dynamoClient;
@@ -99,38 +98,26 @@ async function checkRateLimit(clientIp: string, now: Date): Promise<boolean> {
 async function findCorroborating(
   lat: number, lon: number, type: string, now: Date
 ): Promise<number> {
-  const geohashes = getGeohashNeighbors5(lat, lon);
+  const geohash = encodeGeohash(lat, lon, 5); // explicit precision
   const windowStart = new Date(now.getTime() - SEGMENT_PARAMS.corroborationWindowMinutes * 60_000).toISOString();
 
   try {
-    const results = await Promise.all(
-      geohashes.map(gh =>
-        client.send(new QueryCommand({
-          TableName: INCIDENTS_TABLE,
-          IndexName: 'geohash-createdAt-index',
-          KeyConditionExpression: 'geohash = :gh AND createdAt >= :ws',
-          FilterExpression: '#t = :type AND #s <> :rejected AND expiresAt > :now',
-          ExpressionAttributeNames: { '#t': 'type', '#s': 'status' },
-          ExpressionAttributeValues: {
-            ':gh': { S: gh },
-            ':ws': { S: windowStart },
-            ':type': { S: type },
-            ':rejected': { S: 'rejected' },
-            ':now': { S: now.toISOString() },
-          },
-        }))
-      )
-    );
+    const result = await client.send(new QueryCommand({
+      TableName: INCIDENTS_TABLE,
+      IndexName: 'geohash-createdAt-index',
+      KeyConditionExpression: 'geohash = :gh AND createdAt >= :ws',
+      FilterExpression: '#t = :type AND #s <> :rejected AND expiresAt > :now',
+      ExpressionAttributeNames: { '#t': 'type', '#s': 'status' },
+      ExpressionAttributeValues: {
+        ':gh': { S: geohash },
+        ':ws': { S: windowStart },
+        ':type': { S: type },
+        ':rejected': { S: 'rejected' },
+        ':now': { S: now.toISOString() },
+      },
+    }));
 
-    const incidentMap = new Map<string, Incident>();
-    for (const res of results) {
-      for (const item of res.Items ?? []) {
-        const inc = unmarshall(item) as Incident;
-        incidentMap.set(inc.incidentId, inc);
-      }
-    }
-
-    const nearby = Array.from(incidentMap.values());
+    const nearby = (result.Items ?? []).map((i: Record<string, unknown>) => unmarshall(i as Record<string, import('@aws-sdk/client-dynamodb').AttributeValue>) as Incident);
     return nearby.filter((inc: Incident) =>
       haversineDistanceM(lat, lon, inc.latitude, inc.longitude)
       <= SEGMENT_PARAMS.corroborationRadius
@@ -158,30 +145,6 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     }
 
     const req = CreateIncidentRequestSchema.parse(body);
-
-    if (req.idempotencyKey) {
-      try {
-        const existing = await client.send(new GetItemCommand({
-          TableName: INCIDENTS_TABLE,
-          Key: marshall({ incidentId: req.idempotencyKey }),
-        }));
-        if (existing.Item) {
-          const item = unmarshall(existing.Item) as Incident;
-          return {
-            statusCode: 200,
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              incidentId: item.incidentId,
-              status: item.status,
-              expiresAt: item.expiresAt,
-              duplicate: true,
-            }),
-          };
-        }
-      } catch {
-        // fail open to standard creation pipeline on transient query error
-      }
-    }
 
     const allowed = await checkRateLimit(clientIp, now);
     if (!allowed) {

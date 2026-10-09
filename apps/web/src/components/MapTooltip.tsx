@@ -25,10 +25,10 @@ interface Props {
 }
 
 const LEVEL_EMOJI: Record<string, string> = {
-  low: '🟢',
-  moderate: '🟡',
-  high: '🔴',
-  blocked: '⛔',
+  low: '\uD83D\uDFE2',
+  moderate: '\uD83D\uDFE1',
+  high: '\uD83D\uDD34',
+  blocked: '\u26D4',
 };
 
 export function MapTooltip({ segment, x, y }: Props) {
@@ -39,19 +39,19 @@ export function MapTooltip({ segment, x, y }: Props) {
     >
       {segment.hardBlock && (
         <div className="text-red-400 font-semibold mb-2">
-          ⛔ {segment.hardBlockReason ?? 'Route blocked'}
+          \u26D4 {segment.hardBlockReason ?? 'Route blocked'}
         </div>
       )}
       <div className="flex justify-between mb-1">
-        <span className="text-gray-400">💧 Flood</span>
+        <span className="text-gray-400">\uD83D\uDCA7 Flood</span>
         <span>{LEVEL_EMOJI[segment.floodLevel]} {segment.floodLevel} ({segment.floodScore})</span>
       </div>
       <div className="flex justify-between mb-1">
-        <span className="text-gray-400">🌡️ Heat</span>
+        <span className="text-gray-400">\uD83C\uDF21\uFE0F Heat</span>
         <span>{LEVEL_EMOJI[segment.heatLevel]} {segment.heatLevel} ({segment.heatScore})</span>
       </div>
       <div className="flex justify-between mb-2">
-        <span className="text-gray-400">📊 Confidence</span>
+        <span className="text-gray-400">\uD83D\uDCCA Confidence</span>
         <span className="text-blue-300">{segment.confidenceLevel} ({segment.confidenceScore})</span>
       </div>
       {segment.reasons.length > 0 && (

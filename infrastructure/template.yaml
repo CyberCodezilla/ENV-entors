@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: HeatFlood Guardian — SAM template with Security & DevOps Enhancements
+Description: HeatFlood Guardian — SAM template (Day 3)
 
 Globals:
   Function:
@@ -24,10 +24,17 @@ Parameters:
     Default: ''
     NoEcho: true
     Description: Mapbox Secret Token for Directions API
-  AllowedOrigins:
-    Type: CommaDelimitedList
-    Default: '*'
-    Description: Allowed origins for API Gateway CORS configuration
+  SageMakerEndpointName:
+    Type: String
+    Default: ''
+    Description: Optional SageMaker endpoint; leave empty to keep ML disabled
+
+Conditions:
+  HasSageMakerEndpoint:
+    Fn::Not:
+      - Fn::Equals:
+          - Ref: SageMakerEndpointName
+          - ''
 
 Resources:
 
@@ -78,76 +85,6 @@ Resources:
           KeyType: HASH
 
   # ------------------------------------------------------------------ #
-  # Cognito Auth & RBAC
-  # ------------------------------------------------------------------ #
-
-  UserPool:
-    Type: AWS::Cognito::UserPool
-    Properties:
-      UserPoolName: !Sub 'heatflood-user-pool-${Stage}'
-      AutoVerifiedAttributes:
-        - email
-      UsernameAttributes:
-        - email
-
-  UserPoolClient:
-    Type: AWS::Cognito::UserPoolClient
-    Properties:
-      ClientName: !Sub 'heatflood-client-${Stage}'
-      UserPoolId: !Ref UserPool
-      GenerateSecret: false
-      ExplicitAuthFlows:
-        - ALLOW_USER_SRP_AUTH
-        - ALLOW_REFRESH_TOKEN_AUTH
-
-  ModeratorUserGroup:
-    Type: AWS::Cognito::UserPoolGroup
-    Properties:
-      GroupName: Moderators
-      Description: Administrative group for incident moderation and verification
-      UserPoolId: !Ref UserPool
-
-  # ------------------------------------------------------------------ #
-  # AWS WAF Rate-Limiting Protection
-  # ------------------------------------------------------------------ #
-
-  ApiWebACL:
-    Type: AWS::WAFv2::WebACL
-    Properties:
-      Name: !Sub 'heatflood-webacl-${Stage}'
-      Scope: REGIONAL
-      DefaultAction:
-        Allow: {}
-      VisibilityConfig:
-        SampledRequestsEnabled: true
-        CloudWatchMetricsEnabled: true
-        MetricName: HeatFloodWebACL
-      Rules:
-        - Name: IPBasedRateLimitRule
-          Priority: 1
-          Action:
-            Block: {}
-          VisibilityConfig:
-            SampledRequestsEnabled: true
-            CloudWatchMetricsEnabled: true
-            MetricName: IPBasedRateLimitRule
-          Statement:
-            RateBasedStatement:
-              Limit: 300
-              AggregateKeyType: IP
-
-  # ------------------------------------------------------------------ #
-  # Secrets Manager & Dynamic References
-  # ------------------------------------------------------------------ #
-
-  MapboxSecret:
-    Type: AWS::SecretsManager::Secret
-    Properties:
-      Name: !Sub 'heatflood/mapbox-token-${Stage}'
-      Description: Centralized Mapbox API token with Secrets Manager dynamic rotation
-      SecretString: !Sub '{"token":"${MapboxToken}"}'
-
-  # ------------------------------------------------------------------ #
   # Lambda Functions
   # ------------------------------------------------------------------ #
 
@@ -155,16 +92,27 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub 'heatflood-analyseRoutes-${Stage}'
-      Handler: analyseRoutes.handler
-      CodeUri: ../lambda/dist
+      Handler: dist/analyseRoutes.handler
+      CodeUri: ../lambda
       Environment:
         Variables:
-          MAPBOX_TOKEN: '{{resolve:ssm:/heatflood/mapbox-token}}'
+          MAPBOX_TOKEN: !Ref MapboxToken
+          SAGEMAKER_ENABLED: !If [HasSageMakerEndpoint, 'true', 'false']
+          SAGEMAKER_ENDPOINT_NAME: !Ref SageMakerEndpointName
+          ML_MODEL_VERSION: 'xgb-rainfall-stress-v1'
+          ML_TIMEOUT_MS: '800'
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref IncidentsTable
         - DynamoDBReadPolicy:
             TableName: !Ref HotspotsTable
+        - Statement:
+            Effect: Allow
+            Action: sagemaker:InvokeEndpoint
+            Resource: !Sub 'arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:endpoint/${SageMakerEndpointName}'
+            Condition:
+              StringNotEquals:
+                aws:ResourceTag/heatflood-ml: 'disabled'
         - SSMParameterReadPolicy:
             ParameterName: /heatflood/mapbox-token
       Events:
@@ -179,8 +127,8 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub 'heatflood-getStatus-${Stage}'
-      Handler: getStatus.handler
-      CodeUri: ../lambda/dist
+      Handler: dist/getStatus.handler
+      CodeUri: ../lambda
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref IncidentsTable
@@ -198,8 +146,8 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub 'heatflood-createIncident-${Stage}'
-      Handler: createIncident.handler
-      CodeUri: ../lambda/dist
+      Handler: dist/createIncident.handler
+      CodeUri: ../lambda
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref IncidentsTable
@@ -212,15 +160,13 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /incidents
             Method: POST
-            Auth:
-              Authorizer: CognitoAuthorizer
 
   ListIncidentsFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub 'heatflood-listIncidents-${Stage}'
-      Handler: listIncidents.handler
-      CodeUri: ../lambda/dist
+      Handler: dist/listIncidents.handler
+      CodeUri: ../lambda
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref IncidentsTable
@@ -236,8 +182,8 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub 'heatflood-health-${Stage}'
-      Handler: health.handler
-      CodeUri: ../lambda/dist
+      Handler: dist/health.handler
+      CodeUri: ../lambda
       Events:
         Api:
           Type: HttpApi
@@ -250,8 +196,8 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub 'heatflood-getDemoScenario-${Stage}'
-      Handler: getDemoScenario.handler
-      CodeUri: ../lambda/dist
+      Handler: dist/getDemoScenario.handler
+      CodeUri: ../lambda
       Events:
         Api:
           Type: HttpApi
@@ -270,7 +216,8 @@ Resources:
       Name: !Sub 'heatflood-api-${Stage}'
       StageName: !Ref Stage
       CorsConfiguration:
-        AllowOrigins: !Ref AllowedOrigins
+        AllowOrigins:
+          - '*'
         AllowMethods:
           - GET
           - POST
@@ -278,17 +225,6 @@ Resources:
         AllowHeaders:
           - Content-Type
           - X-Request-Id
-          - Authorization
-      Auth:
-        Authorizers:
-          CognitoAuthorizer:
-            AuthorizationScopes:
-              - openid
-            IdentitySource: $request.header.Authorization
-            JwtConfiguration:
-              issuer: !Sub 'https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}'
-              audience:
-                - !Ref UserPoolClient
 
 Outputs:
   ApiUrl:
@@ -298,10 +234,3 @@ Outputs:
     Value: !Ref IncidentsTable
   HotspotsTableName:
     Value: !Ref HotspotsTable
-  UserPoolId:
-    Value: !Ref UserPool
-  UserPoolClientId:
-    Value: !Ref UserPoolClient
-  WebACLArn:
-    Value: !GetAtt ApiWebACL.Arn
-

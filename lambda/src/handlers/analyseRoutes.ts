@@ -22,21 +22,19 @@ import {
   splitRouteIntoSegments,
   haversineDistanceM,
   SEGMENT_PARAMS,
-  SAGEMAKER_ENABLED,
-  calculateOldestIncidentAge,
 } from '@heatflood/shared';
 import { fetchMapboxRoutes } from '../adapters/mapbox';
 import { fetchWeather, WeatherSnapshot } from '../adapters/openMeteo';
-import { fetchNearbyIncidents, fetchIncidentsForPoints } from '../adapters/dynamodb';
-import { SageMakerMlRiskProvider } from '../adapters/sagemaker';
+import { fetchNearbyIncidents } from '../adapters/dynamodb';
 import { getHotspots } from '../utils/hotspotCache';
 import { scoreSegment } from '../engine/segmentScorer';
+import { SageMakerMlRiskProvider } from '../adapters/sagemaker';
+import { SAGEMAKER_ENABLED } from '@heatflood/shared';
 import { rankRoutes, RawRoute } from '../engine/routeRanker';
 import { logger } from '../utils/logger';
 import type { ActiveIncident, FloodHotspot } from '../engine/floodRisk';
 
 const MAPBOX_TOKEN = process.env.MAPBOX_TOKEN ?? '';
-const mlProvider = SAGEMAKER_ENABLED ? new SageMakerMlRiskProvider() : undefined;
 
 function buildReplayWeather(override: Record<string, unknown>): WeatherSnapshot {
   return {
@@ -79,6 +77,10 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     const midLat = (request.origin.lat + request.destination.lat) / 2;
     const midLon = (request.origin.lon + request.destination.lon) / 2;
 
+    // ML is advisory only: deterministic flood/heat rules and hard-blocks remain authoritative.
+    // The provider is instantiated once per invocation and reused across segments.
+    const mlProvider = SAGEMAKER_ENABLED ? new SageMakerMlRiskProvider() : undefined;
+
     // ---- Fetch routes (always real Mapbox) ----
     const mapboxResult = await fetchMapboxRoutes(request, MAPBOX_TOKEN);
     if (mapboxResult.error || mapboxResult.routes.length === 0) {
@@ -111,15 +113,23 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         { lat: midLat, lon: midLon },
       ];
 
-      const [weatherRes, incidentsRes, hotspotsRes] = await Promise.all([
+      const [weatherRes, incidentsLists, hotspotsRes] = await Promise.all([
         fetchWeather(midLat, midLon, departureTime),
-        fetchIncidentsForPoints(samplePoints),
+        Promise.all(samplePoints.map(p => fetchNearbyIncidents(p.lat, p.lon))),
         getHotspots(),
       ]);
 
       weather = weatherRes;
-      incidents = incidentsRes;
       hotspots = hotspotsRes;
+
+      // Merge and deduplicate incidents across all sampled points
+      const incidentMap = new Map<string, ActiveIncident>();
+      for (const list of incidentsLists) {
+        for (const inc of list) {
+          incidentMap.set(inc.incidentId, inc);
+        }
+      }
+      incidents = Array.from(incidentMap.values());
     }
 
     // ---- Score each route ----
@@ -189,8 +199,16 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     );
 
     const { routes, hasConfidentRecommendation, noConfidentRouteReason } = rankRoutes(rawRoutes);
+    const mlAvailable = routes.some(route => route.segments.some(segment => segment.mlSignal?.available === true));
 
-    const oldestIncidentAge = calculateOldestIncidentAge(incidents, now);
+    // Use reduce instead of Math.max(...spread) to avoid stack overflow
+    // when incidents array is large (spread pushes all elements onto the call stack)
+    const oldestIncidentAge = incidents.length > 0
+      ? incidents.reduce((max, i) => {
+          const age = (now.getTime() - new Date(i.observedAt).getTime()) / 60_000;
+          return age > max ? age : max;
+        }, 0)
+      : null;
 
     const response: AnalyseRoutesResponse = {
       requestId,
@@ -218,7 +236,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         hotspotsLoadedAt: now.toISOString(),
       },
 
-      mlAvailable: rawRoutes.some(r => r.segments.some(s => s.mlSignal?.available === true)),
+      mlAvailable,
       alternativesAvailable: routes.length > 1,
     };
 
