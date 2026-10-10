@@ -70,6 +70,7 @@ jobs:
       - name: Build Frontend App
         env:
           NEXT_PUBLIC_MAPBOX_TOKEN: ${{ secrets.NEXT_PUBLIC_MAPBOX_TOKEN }}
+          NEXT_PUBLIC_API_BASE_URL: "https://jpiub1heok.execute-api.ap-south-1.amazonaws.com/prod"
         run: npm run build --workspace=apps/web
 
       - name: Upload Frontend Build

@@ -10,7 +10,8 @@ import type {
 } from '@heatflood/shared';
 import type { MapIncident } from '@/components/Map';
 
-const BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
+const DEFAULT_API_BASE_URL = 'https://jpiub1heok.execute-api.ap-south-1.amazonaws.com/prod';
+const BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || DEFAULT_API_BASE_URL).replace(/\/+$/, '');
 
 async function apiPost<Req, Res>(path: string, body: Req): Promise<Res> {
   const res = await fetch(`${BASE}${path}`, {
