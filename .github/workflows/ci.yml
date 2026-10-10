@@ -120,9 +120,9 @@ jobs:
 
       - name: Build and Deploy SAM Backend
         run: |
-          cd infrastructure
-          sam build
+          sam build -t infrastructure/template.yaml
           sam deploy \
+            -t .aws-sam/build/template.yaml \
             --stack-name heatflood-guardian \
             --region ap-south-1 \
             --capabilities CAPABILITY_IAM \
