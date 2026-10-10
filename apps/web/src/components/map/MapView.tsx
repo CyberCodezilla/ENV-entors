@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import mapboxgl from 'mapbox-gl';
@@ -30,6 +30,8 @@ export default function MapView({ onBboxChange, onRequestReport }: MapViewProps)
   const destMarkerRef = useRef<mapboxgl.Marker | null>(null);
   const gateMarkersRef = useRef<mapboxgl.Marker[]>([]);
   const incidentMarkersRef = useRef<mapboxgl.Marker[]>([]);
+  const routeLayersRef = useRef<string[]>([]);
+  const routeSourcesRef = useRef<string[]>([]);
   const incidents = useAppStore((state) => state.viewportIncidents.items);
 
   const [mapLoaded, setMapLoaded] = useState(false);
@@ -293,206 +295,255 @@ export default function MapView({ onBboxChange, onRequestReport }: MapViewProps)
     const map = mapRef.current;
     if (!map || !mapLoaded) return;
 
-    // Clear old route layers and sources
-    const existingLayers = map.getStyle()?.layers ?? [];
-    existingLayers.forEach((l) => {
-      if (l.id.startsWith('route-') || l.id.startsWith('seg-hover-')) {
-        map.removeLayer(l.id);
-      }
-    });
+    const drawRoutes = () => {
+      if (!map.isStyleLoaded()) return;
 
-    const existingSources = Object.keys(map.getStyle()?.sources ?? {});
-    existingSources.forEach((s) => {
-      if (s.startsWith('route-') || s.startsWith('seg-hover-')) {
-        map.removeSource(s);
-      }
-    });
-
-    // Clear gate markers
-    gateMarkersRef.current.forEach((m) => m.remove());
-    gateMarkersRef.current = [];
-
-    if (routes.length === 0) return;
-
-    routes.forEach((route) => {
-      const isSelected = route.routeId === selectedRouteId;
-      const srcId = `route-${route.routeId}`;
-      const casingId = `route-casing-${route.routeId}`;
-      const glowId = `route-glow-${route.routeId}`;
-      const mainId = `route-main-${route.routeId}`;
-
-      // Convert segments into GeoJSON feature collection for fine-grained per-segment styling
-      const segmentFeatures: GeoJSON.Feature[] = route.segments.map((seg) => {
-        let score = Math.max(seg.floodRisk, seg.heatRisk);
-        if (metricLens === 'flood') score = seg.floodRisk;
-        if (metricLens === 'heat') score = seg.heatRisk;
-        if (metricLens === 'confidence') score = 100 - seg.confidence; // higher is worse
-
-        const color = scoreToRiskColor(score);
-
-        return {
-          type: 'Feature',
-          geometry: {
-            type: 'LineString',
-            coordinates: [
-              [seg.startCoord.lon, seg.startCoord.lat],
-              [seg.endCoord.lon, seg.endCoord.lat],
-            ],
-          },
-          properties: {
-            routeId: route.routeId,
-            segmentIndex: seg.segmentIndex,
-            color: route.isHardBlocked ? '#7F1D1D' : color,
-            floodRisk: seg.floodRisk,
-            heatRisk: seg.heatRisk,
-            confidence: seg.confidence,
-            hardBlock: seg.hardBlock,
-            hardBlockReason: seg.hardBlockReason,
-            segmentLengthM: seg.segmentLengthM,
-            estimatedArrivalUtc: seg.estimatedArrivalUtc,
-          },
-        };
-      });
-
-      map.addSource(srcId, {
-        type: 'geojson',
-        lineMetrics: true,
-        data: {
-          type: 'FeatureCollection',
-          features: segmentFeatures,
-        },
-      });
-
-      // 1. Casing (width 10, dark #0A0E14)
-      map.addLayer({
-        id: casingId,
-        type: 'line',
-        source: srcId,
-        layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: {
-          'line-color': '#0A0E14',
-          'line-width': isSelected ? 10 : 7,
-          'line-opacity': 0.8,
-        },
-      });
-
-      // 2. Glow (width 14, blur opacity 0.25, selected route only)
-      if (isSelected) {
-        map.addLayer({
-          id: glowId,
-          type: 'line',
-          source: srcId,
-          layout: { 'line-join': 'round', 'line-cap': 'round' },
-          paint: {
-            'line-color': '#FFFFFF',
-            'line-width': 14,
-            'line-opacity': 0.25,
-            'line-blur': 3,
-          },
+      try {
+        // Clear old route layers safely
+        routeLayersRef.current.forEach((id) => {
+          if (map.getLayer(id)) {
+            try { map.removeLayer(id); } catch {}
+          }
         });
-      }
+        routeLayersRef.current = [];
 
-      // 3. Main Route Line
-      map.addLayer({
-        id: mainId,
-        type: 'line',
-        source: srcId,
-        layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: {
-          'line-color': ['get', 'color'],
-          'line-width': isSelected ? 6 : 4,
-          'line-opacity': isSelected ? 1.0 : route.isHardBlocked ? 0.35 : 0.65,
-          ...(route.isHardBlocked ? { 'line-dasharray': [2, 2] } : {}),
-        },
-      });
-
-      // 4. Sub-pixel invisible hover hit layer (width 20, opacity 0) for selected route
-      if (isSelected) {
-        const hoverId = `seg-hover-${route.routeId}`;
-        map.addLayer({
-          id: hoverId,
-          type: 'line',
-          source: srcId,
-          layout: { 'line-join': 'round', 'line-cap': 'round' },
-          paint: {
-            'line-color': '#ffffff',
-            'line-width': 22,
-            'line-opacity': 0,
-          },
+        // Clear old route sources safely
+        routeSourcesRef.current.forEach((id) => {
+          if (map.getSource(id)) {
+            try { map.removeSource(id); } catch {}
+          }
         });
+        routeSourcesRef.current = [];
 
-        map.on('mousemove', hoverId, (e) => {
-          if (!e.features?.[0]) return;
-          const props = e.features[0].properties as Record<string, unknown>;
-          const segIdx = Number(props.segmentIndex);
-          const fullSeg = route.segments[segIdx];
-
-          if (fullSeg) {
-            setHoveredSegment({
-              segment: fullSeg,
-              x: e.originalEvent.clientX,
-              y: e.originalEvent.clientY,
+        // Extra fallback cleanup for any remaining route/seg layers
+        try {
+          const style = map.getStyle();
+          if (style && style.layers) {
+            style.layers.forEach((l) => {
+              if (l.id.startsWith('route-') || l.id.startsWith('seg-hover-')) {
+                if (map.getLayer(l.id)) {
+                  try { map.removeLayer(l.id); } catch {}
+                }
+              }
             });
-            map.getCanvas().style.cursor = 'pointer';
+          }
+          if (style && style.sources) {
+            Object.keys(style.sources).forEach((s) => {
+              if (s.startsWith('route-') || s.startsWith('seg-hover-')) {
+                if (map.getSource(s)) {
+                  try { map.removeSource(s); } catch {}
+                }
+              }
+            });
+          }
+        } catch {
+          // getStyle may throw if style is loading; ignore
+        }
+
+        // Clear gate markers
+        gateMarkersRef.current.forEach((m) => m.remove());
+        gateMarkersRef.current = [];
+
+        if (routes.length === 0) return;
+
+        routes.forEach((route) => {
+          const isSelected = route.routeId === selectedRouteId;
+          const srcId = `route-${route.routeId}`;
+          const casingId = `route-casing-${route.routeId}`;
+          const glowId = `route-glow-${route.routeId}`;
+          const mainId = `route-main-${route.routeId}`;
+
+          // Convert segments into GeoJSON feature collection for fine-grained per-segment styling
+          const segmentFeatures: GeoJSON.Feature[] = route.segments.map((seg) => {
+            let score = Math.max(seg.floodRisk, seg.heatRisk);
+            if (metricLens === 'flood') score = seg.floodRisk;
+            if (metricLens === 'heat') score = seg.heatRisk;
+            if (metricLens === 'confidence') score = 100 - seg.confidence; // higher is worse
+
+            const color = scoreToRiskColor(score);
+
+            return {
+              type: 'Feature',
+              geometry: {
+                type: 'LineString',
+                coordinates: [
+                  [seg.startCoord.lon, seg.startCoord.lat],
+                  [seg.endCoord.lon, seg.endCoord.lat],
+                ],
+              },
+              properties: {
+                routeId: route.routeId,
+                segmentIndex: seg.segmentIndex,
+                color: route.isHardBlocked ? '#7F1D1D' : color,
+                floodRisk: seg.floodRisk,
+                heatRisk: seg.heatRisk,
+                confidence: seg.confidence,
+                hardBlock: seg.hardBlock,
+                hardBlockReason: seg.hardBlockReason,
+                segmentLengthM: seg.segmentLengthM,
+                estimatedArrivalUtc: seg.estimatedArrivalUtc,
+              },
+            };
+          });
+
+          map.addSource(srcId, {
+            type: 'geojson',
+            lineMetrics: true,
+            data: {
+              type: 'FeatureCollection',
+              features: segmentFeatures,
+            },
+          });
+          routeSourcesRef.current.push(srcId);
+
+          // 1. Casing (width 10, dark #0A0E14)
+          map.addLayer({
+            id: casingId,
+            type: 'line',
+            source: srcId,
+            layout: { 'line-join': 'round', 'line-cap': 'round' },
+            paint: {
+              'line-color': '#0A0E14',
+              'line-width': isSelected ? 10 : 7,
+              'line-opacity': 0.8,
+            },
+          });
+          routeLayersRef.current.push(casingId);
+
+          // 2. Glow (width 14, blur opacity 0.25, selected route only)
+          if (isSelected) {
+            map.addLayer({
+              id: glowId,
+              type: 'line',
+              source: srcId,
+              layout: { 'line-join': 'round', 'line-cap': 'round' },
+              paint: {
+                'line-color': '#FFFFFF',
+                'line-width': 14,
+                'line-opacity': 0.25,
+                'line-blur': 3,
+              },
+            });
+            routeLayersRef.current.push(glowId);
+          }
+
+          // 3. Main Route Line
+          map.addLayer({
+            id: mainId,
+            type: 'line',
+            source: srcId,
+            layout: { 'line-join': 'round', 'line-cap': 'round' },
+            paint: {
+              'line-color': ['get', 'color'],
+              'line-width': isSelected ? 6 : 4,
+              'line-opacity': isSelected ? 1.0 : route.isHardBlocked ? 0.35 : 0.65,
+              ...(route.isHardBlocked ? { 'line-dasharray': [2, 2] } : {}),
+            },
+          });
+          routeLayersRef.current.push(mainId);
+
+          // 4. Sub-pixel invisible hover hit layer (width 20, opacity 0) for selected route
+          if (isSelected) {
+            const hoverId = `seg-hover-${route.routeId}`;
+            map.addLayer({
+              id: hoverId,
+              type: 'line',
+              source: srcId,
+              layout: { 'line-join': 'round', 'line-cap': 'round' },
+              paint: {
+                'line-color': '#ffffff',
+                'line-width': 22,
+                'line-opacity': 0,
+              },
+            });
+            routeLayersRef.current.push(hoverId);
+
+            map.on('mousemove', hoverId, (e) => {
+              if (!e.features?.[0]) return;
+              const props = e.features[0].properties as Record<string, unknown>;
+              const segIdx = Number(props.segmentIndex);
+              const fullSeg = route.segments[segIdx];
+
+              if (fullSeg) {
+                setHoveredSegment({
+                  segment: fullSeg,
+                  x: e.originalEvent.clientX,
+                  y: e.originalEvent.clientY,
+                });
+                try { map.getCanvas().style.cursor = 'pointer'; } catch {}
+              }
+            });
+
+            map.on('mouseleave', hoverId, () => {
+              setHoveredSegment(null);
+              try { map.getCanvas().style.cursor = ''; } catch {}
+            });
+
+            map.on('click', hoverId, (e) => {
+              if (!e.features?.[0]) return;
+              const props = e.features[0].properties as Record<string, unknown>;
+              selectSegment(Number(props.segmentIndex));
+            });
+          }
+
+          // Add Gate marker at blocked segment midpoint if route is hard-blocked
+          if (route.isHardBlocked) {
+            const blockedSeg = route.segments.find((s) => s.hardBlock);
+            if (blockedSeg) {
+              const midLat = (blockedSeg.startCoord.lat + blockedSeg.endCoord.lat) / 2;
+              const midLon = (blockedSeg.startCoord.lon + blockedSeg.endCoord.lon) / 2;
+              const gateEl = createGateMarkerEl(blockedSeg.hardBlockReason);
+              const gateMarker = new mapboxgl.Marker({ element: gateEl })
+                .setLngLat([midLon, midLat])
+                .addTo(map);
+
+              gateMarker.getElement().addEventListener('click', () => {
+                selectRoute(route.routeId);
+                selectSegment(blockedSeg.segmentIndex);
+              });
+
+              gateMarkersRef.current.push(gateMarker);
+            }
           }
         });
 
-        map.on('mouseleave', hoverId, () => {
-          setHoveredSegment(null);
-          map.getCanvas().style.cursor = '';
-        });
+        // Camera fitBounds to selected route
+        const selectedRoute = routes.find((r) => r.routeId === selectedRouteId);
+        if (selectedRoute?.geometry?.coordinates?.length) {
+          const coords = selectedRoute.geometry.coordinates;
+          const lons = coords.map((c) => c[0]);
+          const lats = coords.map((c) => c[1]);
 
-        map.on('click', hoverId, (e) => {
-          if (!e.features?.[0]) return;
-          const props = e.features[0].properties as Record<string, unknown>;
-          selectSegment(Number(props.segmentIndex));
-        });
-      }
-
-      // Add Gate marker at blocked segment midpoint if route is hard-blocked
-      if (route.isHardBlocked) {
-        const blockedSeg = route.segments.find((s) => s.hardBlock);
-        if (blockedSeg) {
-          const midLat = (blockedSeg.startCoord.lat + blockedSeg.endCoord.lat) / 2;
-          const midLon = (blockedSeg.startCoord.lon + blockedSeg.endCoord.lon) / 2;
-          const gateEl = createGateMarkerEl(blockedSeg.hardBlockReason);
-          const gateMarker = new mapboxgl.Marker({ element: gateEl })
-            .setLngLat([midLon, midLat])
-            .addTo(map);
-
-          gateMarker.getElement().addEventListener('click', () => {
-            selectRoute(route.routeId);
-            selectSegment(blockedSeg.segmentIndex);
-          });
-
-          gateMarkersRef.current.push(gateMarker);
+          const isMobile = window.innerWidth < 1024;
+          map.fitBounds(
+            [
+              [Math.min(...lons), Math.min(...lats)],
+              [Math.max(...lons), Math.max(...lats)],
+            ],
+            {
+              padding: isMobile
+                ? { top: 80, right: 40, bottom: 320, left: 40 }
+                : { top: 80, right: 80, bottom: 140, left: 448 },
+              maxZoom: 15.5,
+              duration: 1200,
+              essential: true,
+            }
+          );
         }
+      } catch (err) {
+        console.warn('Mapbox route render warning:', err);
       }
-    });
+    };
 
-    // Camera fitBounds to selected route (Section 7.3 padding)
-    const selectedRoute = routes.find((r) => r.routeId === selectedRouteId);
-    if (selectedRoute?.geometry?.coordinates?.length) {
-      const coords = selectedRoute.geometry.coordinates;
-      const lons = coords.map((c) => c[0]);
-      const lats = coords.map((c) => c[1]);
-
-      const isMobile = window.innerWidth < 1024;
-      map.fitBounds(
-        [
-          [Math.min(...lons), Math.min(...lats)],
-          [Math.max(...lons), Math.max(...lats)],
-        ],
-        {
-          padding: isMobile
-            ? { top: 80, right: 40, bottom: 320, left: 40 }
-            : { top: 80, right: 80, bottom: 140, left: 448 },
-          maxZoom: 15.5,
-          duration: 1200,
-          essential: true,
-        }
-      );
+    if (map.isStyleLoaded()) {
+      drawRoutes();
+    } else {
+      map.once('styledata', drawRoutes);
     }
+
+    return () => {
+      map.off('styledata', drawRoutes);
+    };
   }, [
     routes,
     selectedRouteId,
