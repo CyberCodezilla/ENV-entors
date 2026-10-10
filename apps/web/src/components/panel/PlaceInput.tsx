@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
 import { MapPin, Crosshair, Navigation, AlertTriangle, Loader2 } from 'lucide-react';
@@ -99,6 +99,22 @@ export function PlaceInput({
 
   // Geolocation trigger
   function handleUseMyLocation() {
+    // Modern browsers block real GPS on HTTP (non-secure context)
+    if (typeof window !== 'undefined' && !window.isSecureContext) {
+      const fallbackPlace: Place = {
+        name: 'Versova Beach (Mumbai Pilot Zone)',
+        lat: 19.112,
+        lon: 72.832,
+      };
+      onChange(fallbackPlace);
+      setQuery(fallbackPlace.name);
+      toast({
+        variant: 'info',
+        message: 'Browser GPS requires HTTPS. Set to Mumbai Pilot Zone location.',
+      });
+      return;
+    }
+
     if (!navigator.geolocation) {
       toast({
         variant: 'error',
@@ -124,9 +140,16 @@ export function PlaceInput({
         });
       },
       () => {
+        const fallbackPlace: Place = {
+          name: 'Versova Beach (Mumbai Pilot Zone)',
+          lat: 19.112,
+          lon: 72.832,
+        };
+        onChange(fallbackPlace);
+        setQuery(fallbackPlace.name);
         toast({
           variant: 'warn',
-          message: 'Location access denied or timed out.',
+          message: 'Location access denied or unavailable. Set to Mumbai Pilot Zone.',
         });
       },
       { timeout: 10000, enableHighAccuracy: true }
