@@ -54,6 +54,7 @@ function weightedAverage(values: number[], weights: number[]): number {
 export function rankRoutes(rawRoutes: RawRoute[]): {
   routes: RouteResult[];
   hasConfidentRecommendation: boolean;
+  recommendationStatus: 'confident' | 'degraded' | 'insufficient_data';
   noConfidentRouteReason: string | null;
 } {
   const evaluated = rawRoutes.map((raw) => {
