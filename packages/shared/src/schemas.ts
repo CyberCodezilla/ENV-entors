@@ -177,6 +177,7 @@ export const AnalyseRoutesResponseSchema = z.object({
 
   routes: z.array(RouteResultSchema),
   hasConfidentRecommendation: z.boolean(),
+  recommendationStatus: z.enum(['confident', 'degraded', 'insufficient_data']),
   noConfidentRouteReason: z.string().nullable(),
 
   weather: z.object({

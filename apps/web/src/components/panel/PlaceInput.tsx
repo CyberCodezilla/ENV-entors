@@ -75,7 +75,7 @@ export function PlaceInput({
       try {
         const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(
           query
-        )}.json?proximity=72.85,19.12&bbox=72.82,19.10,72.87,19.145&limit=5&access_token=${token}`;
+        )}.json?proximity=72.85,19.12&bbox=72.77,18.89,72.98,19.27&limit=5&access_token=${token}`;
         const res = await fetch(url);
         if (res.ok) {
           const data = await res.json();

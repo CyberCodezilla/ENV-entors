@@ -4,8 +4,8 @@
   "description": "Shared schemas, types and utilities for HeatFlood Guardian",
   "main": "src/index.ts",
   "scripts": {
-    "build": "tsc",
-    "typecheck": "tsc --noEmit"
+    "build": "npx tsc",
+    "typecheck": "npx tsc --noEmit"
   },
   "dependencies": {
     "zod": "^3.23.8"

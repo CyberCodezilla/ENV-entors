@@ -38,9 +38,24 @@ async function apiGet<Res>(path: string, params?: Record<string, string>): Promi
   return res.json() as Promise<Res>;
 }
 
+const MUMBAI_BBOX = { lngMin: 72.77, latMin: 18.89, lngMax: 72.98, latMax: 19.27 };
+
+function isWithinBbox(lat: number, lon: number): boolean {
+  return (
+    lat >= MUMBAI_BBOX.latMin &&
+    lat <= MUMBAI_BBOX.latMax &&
+    lon >= MUMBAI_BBOX.lngMin &&
+    lon <= MUMBAI_BBOX.lngMax
+  );
+}
+
 export const api = {
-  analyseRoutes: (req: AnalyseRoutesRequest) =>
-    apiPost<AnalyseRoutesRequest, AnalyseRoutesResponse>('/routes/analyse', req),
+  analyseRoutes: (req: AnalyseRoutesRequest) => {
+    if (!isWithinBbox(req.origin.lat, req.origin.lon) || !isWithinBbox(req.destination.lat, req.destination.lon)) {
+      return Promise.reject(new Error('Coordinates outside the supported Mumbai bounding box [72.77, 18.89, 72.98, 19.27]'));
+    }
+    return apiPost<AnalyseRoutesRequest, AnalyseRoutesResponse>('/routes/analyse', req);
+  },
 
   getStatus: (lat: number, lon: number) =>
     apiGet<AreaStatusResponse>('/status', {

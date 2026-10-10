@@ -18,6 +18,7 @@ import {
 import { PutItemCommand, QueryCommand, ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import { v4 as uuidv4 } from 'uuid';
+import * as crypto from 'crypto';
 import { dynamoClient, getGeohashNeighbors5 } from '../adapters/dynamodb';
 import { logger } from '../utils/logger';
 
@@ -96,7 +97,11 @@ export const handler = async (event: SQSEvent): Promise<SQSBatchResponse> => {
         : unverifiedExpiry;
       const ttlEpoch = Math.floor(effectiveExpiry.getTime() / 1000);
 
-      const incidentId = req.idempotencyKey || uuidv4();
+      const timestampMinute = Math.floor(Date.parse(req.observedAt || payload.requestedAt || now.toISOString()) / 60000);
+      const incidentId = req.idempotencyKey ||
+        crypto.createHash('sha256')
+          .update(`${req.latitude}:${req.longitude}:${req.type}:${timestampMinute}`)
+          .digest('hex');
 
       const incident: Incident & { ttlEpoch: number } = {
         incidentId,

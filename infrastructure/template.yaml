@@ -14,6 +14,7 @@ Globals:
         AWS_NODEJS_CONNECTION_REUSE_ENABLED: '1'
         INCIDENTS_TABLE: !Ref IncidentsTable
         HOTSPOTS_TABLE: !Ref HotspotsTable
+        RATE_LIMIT_TABLE: !Ref RateLimitTable
 
 Parameters:
   Stage:
@@ -93,6 +94,22 @@ Resources:
           AttributeType: S
       KeySchema:
         - AttributeName: hotspotId
+          KeyType: HASH
+
+  RateLimitTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    Properties:
+      TableName: !Sub 'heatflood-ratelimit-${Stage}'
+      BillingMode: PAY_PER_REQUEST
+      TimeToLiveSpecification:
+        AttributeName: ttlEpoch
+        Enabled: true
+      AttributeDefinitions:
+        - AttributeName: key
+          AttributeType: S
+      KeySchema:
+        - AttributeName: key
           KeyType: HASH
 
   # ------------------------------------------------------------------ #
@@ -229,6 +246,8 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref IncidentsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RateLimitTable
         - SQSSendMessagePolicy:
             QueueName: !GetAtt IncidentReportsQueue.QueueName
       Events:
