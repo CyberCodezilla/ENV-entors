@@ -80,23 +80,14 @@ export async function fetchWeather(
       };
     };
 
-    // Find the hourly slot closest to targetTimeUtc.
-    // Use Date.parse() instead of new Date() to avoid allocating 48 Date objects.
+    // Direct O(1) index calculation for uniform 1-hour forecast slots
     const targetMs = targetTimeUtc.getTime();
-    let bestIdx = 0;
-    let bestDiff = Infinity;
-
     const times = data.hourly.time;
-    for (let i = 0; i < times.length; i++) {
-      const diff = Math.abs(Date.parse(times[i] + ':00Z') - targetMs);
-      if (diff < bestDiff) {
-        bestDiff = diff;
-        bestIdx = i;
-      } else if (i > 0) {
-        // Early-exit: once diff starts increasing we’ve passed the minimum
-        // (slots are monotonically increasing in time)
-        break;
-      }
+    let bestIdx = 0;
+    if (times.length > 0) {
+      const startMs = Date.parse(times[0] + ':00Z');
+      const calculatedIdx = Math.round((targetMs - startMs) / 3600000);
+      bestIdx = Math.max(0, Math.min(times.length - 1, calculatedIdx));
     }
 
     const slotTime = times[bestIdx];
