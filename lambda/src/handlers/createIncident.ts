@@ -45,39 +45,49 @@ const RATE_LIMIT_PER_HOUR = 5;
 /**
  * Per-IP hourly rate limiter.
  *
- * Rate-limit records live in a dedicated rate-limit table (`process.env.RATE_LIMIT_TABLE`).
- * Item schema:
- *   key: 'ratelimit#<IP>#<YYYY-MM-DDTHH>' (HASH PK)
- *   count: number
- *   ttlEpoch: number
+ * Rate-limit records live in the same incidents table under:
+ *   geohash  = 'ratelimit'           (GSI partition key)
+ *   incidentId = 'ratelimit#<IP>#<YYYY-MM-DDTHH>#<uuid>'  (table PK)
+ *
+ * We query the GSI for all records whose incidentId begins_with
+ * 'ratelimit#<IP>#<bucket>' to count how many exist for this IP+hour.
  */
 async function checkRateLimit(clientIp: string, now: Date): Promise<boolean> {
-  const rateLimitTable = process.env.RATE_LIMIT_TABLE;
-  if (!rateLimitTable) {
-    // Fail open if no rate limit table is configured
-    return true;
-  }
-
   const hourBucket = now.toISOString().slice(0, 13); // "2026-07-18T09"
-  const rateLimitKey = `ratelimit#${clientIp}#${hourBucket}`;
+  const prefix = `ratelimit#${clientIp}#${hourBucket}`;
   const windowExpiry = Math.floor(now.getTime() / 1000) + 3600;
+  const partitionKey = `ratelimit#${clientIp}`;
 
   try {
-    const getResult = await client.send(new GetItemCommand({
-      TableName: rateLimitTable,
-      Key: marshall({ key: rateLimitKey }),
+    // Query via geohash GSI — partitioned by IP to avoid global hot partition
+    const result = await client.send(new QueryCommand({
+      TableName: INCIDENTS_TABLE,
+      IndexName: 'geohash-createdAt-index',
+      KeyConditionExpression: 'geohash = :gh',
+      FilterExpression: 'begins_with(incidentId, :prefix)',
+      ExpressionAttributeValues: {
+        ':gh': { S: partitionKey },
+        ':prefix': { S: prefix },
+      },
     }));
 
-    const currentCount = getResult.Item ? (unmarshall(getResult.Item).count as number) : 0;
-    if (currentCount >= RATE_LIMIT_PER_HOUR) return false;
+    const count = result.Items?.length ?? 0;
+    if (count >= RATE_LIMIT_PER_HOUR) return false;
 
+    // Write a new counter record (TTL = end of hour window)
     await client.send(new PutItemCommand({
-      TableName: rateLimitTable,
+      TableName: INCIDENTS_TABLE,
       Item: marshall({
-        key: rateLimitKey,
-        count: currentCount + 1,
-        ttlEpoch: windowExpiry,
+        incidentId: `${prefix}#${uuidv4()}`,
+        geohash: partitionKey,
         createdAt: now.toISOString(),
+        expiresAt: new Date(windowExpiry * 1000).toISOString(),
+        ttlEpoch: windowExpiry,
+        type: '_ratelimit',
+        status: '_internal',
+        sourceType: '_internal',
+        isDemo: false,
+        version: 1,
       }),
     }));
     return true;

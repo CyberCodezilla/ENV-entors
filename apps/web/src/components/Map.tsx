@@ -126,29 +126,13 @@ export function Map({ routes, selectedRouteId, incidents, onBboxChange, onReques
 
     const eventCleanups: Array<() => void> = [];
 
-    if (!map.isStyleLoaded()) return;
-
-    try {
-      const style = map.getStyle();
-      if (style?.layers) {
-        style.layers.forEach(l => {
-          if (l.id.startsWith('route-') || l.id.startsWith('seg-')) {
-            if (map.getLayer(l.id)) {
-              try { map.removeLayer(l.id); } catch {}
-            }
-          }
-        });
-      }
-      if (style?.sources) {
-        Object.keys(style.sources).forEach(s => {
-          if (s.startsWith('route-') || s.startsWith('seg-')) {
-            if (map.getSource(s)) {
-              try { map.removeSource(s); } catch {}
-            }
-          }
-        });
-      }
-    } catch {}
+    // Cleanup
+    map.getStyle()?.layers?.forEach(l => {
+      if (l.id.startsWith('route-') || l.id.startsWith('seg-')) map.removeLayer(l.id);
+    });
+    Object.keys(map.getStyle()?.sources ?? {}).forEach(s => {
+      if (s.startsWith('route-') || s.startsWith('seg-')) map.removeSource(s);
+    });
 
     routes.forEach((route) => {
       const isSelected = route.routeId === selectedRouteId;

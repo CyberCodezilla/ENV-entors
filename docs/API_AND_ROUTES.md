@@ -244,3 +244,11 @@ Returns backend health status, region, version, and SageMaker integration state.
 3. **CORS Policy:**
    - `Access-Control-Allow-Origin: *`
    - Allowed Methods: `GET, POST, OPTIONS`
+
+
+## Innovation scenario API (additive)
+
+- `POST /scenarios/run` — accepts a preset `scenarioId` (`cloudburst`, `heat`, `blocked-road`, or `compound`) and bounded scenario inputs; returns deterministic indices, ranked recommendations, provenance, uncertainty, trace ID, and audit/event status. Every result is labelled simulated and requires human review.
+- `GET /scenarios/history` — returns the latest persisted scenario audit entries; if DynamoDB is unavailable, returns an explicit non-persistent status instead of failing the deterministic simulator.
+- EventBridge publishes `HeatFloodScenarioAssessed` on the stage-specific event bus. A Step Functions workflow validates that the event is explicitly simulated and updates the audit row to `PROCESSED`, with bounded retries.
+- `GET /command-center/` is the static frontend route. It uses the configured `NEXT_PUBLIC_API_BASE_URL`; when the API is unavailable, the page visibly falls back to a local deterministic simulation and states that the run was not durably audited.

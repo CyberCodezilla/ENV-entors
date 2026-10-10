@@ -4,19 +4,16 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "npx tailwindcss -i ./src/app/globals.css -o ./src/app/tailwind-built.css && next build",
+    "build": "tailwindcss -i ./src/app/globals.css -o ./src/app/tailwind-built.css && next build",
     "start": "next start",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@heatflood/shared": "*",
-    "framer-motion": "^14.1.0",
-    "lucide-react": "^1.55.0",
     "mapbox-gl": "^3.4.0",
     "next": "14.2.4",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "zustand": "^5.0.15"
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@types/mapbox-gl": "^3.4.0",

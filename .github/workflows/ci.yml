@@ -2,14 +2,17 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [main, dev]
+    branches: [ main, dev ]
   pull_request:
-    branches: [main, dev]
+    branches: [ main, dev ]
 
 jobs:
-  validate-test:
-    name: Validate and Test
+  validate-test-deploy:
+    name: Validate, Test & Deploy
     runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
     steps:
       - name: Checkout Code
@@ -18,23 +21,20 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
-          cache: npm
+          node-version: '20'
+          cache: 'npm'
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-          cache: pip
+          python-version: '3.11'
+          cache: 'pip'
 
       - name: Install Node Dependencies
         run: npm ci
 
       - name: Install Python Dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r ml/requirements.txt
-          pip install pytest
+        run: pip install -r ml/requirements.txt
 
       - name: Build Lambda Code
         run: npm run build --workspace=lambda
@@ -46,74 +46,12 @@ jobs:
         run: npx vitest run tests/unit
 
       - name: Run Python ML Tests
-        env:
-          PYTHONPATH: ml
-        run: python -m pytest ml/tests
+        run: |
+          export PYTHONPATH=ml
+          pytest ml/tests
 
-  build-frontend:
-    name: Build Frontend
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: npm
-
-      - name: Install Node Dependencies
-        run: npm ci
-
-      - name: Build Frontend App
-        env:
-          NEXT_PUBLIC_MAPBOX_TOKEN: ${{ secrets.NEXT_PUBLIC_MAPBOX_TOKEN }}
-          NEXT_PUBLIC_API_BASE_URL: "https://jpiub1heok.execute-api.ap-south-1.amazonaws.com/prod"
+      - name: Build Frontend (validation)
         run: npm run build --workspace=apps/web
-
-      - name: Upload Frontend Build
-        uses: actions/upload-artifact@v4
-        with:
-          name: frontend-build
-          path: apps/web/out
-          if-no-files-found: error
-
-  deploy-aws:
-    name: Deploy to AWS
-    runs-on: ubuntu-latest
-    needs: [validate-test, build-frontend]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: npm
-
-      - name: Install Node Dependencies
-        run: npm ci
-
-      - name: Build Lambda Code
-        run: npm run build --workspace=lambda
-
-      - name: Download Frontend Build
-        uses: actions/download-artifact@v4
-        with:
-          name: frontend-build
-          path: apps/web/out
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ap-south-1
 
       - name: Setup AWS SAM CLI
         uses: aws-actions/setup-sam@v2
@@ -121,10 +59,24 @@ jobs:
       - name: Validate SAM Infrastructure Template
         run: sam validate -t infrastructure/template.yaml
 
-      - name: Build and Deploy SAM Backend
+      - name: Explain deployment prerequisites
+        if: github.ref == 'refs/heads/main' && (env.AWS_ACCESS_KEY_ID == '' || env.AWS_SECRET_ACCESS_KEY == '')
+        run: echo "::warning::AWS deployment was skipped because repository secret AWS_ACCESS_KEY_ID is missing. Configure AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in GitHub Actions secrets. Never commit credentials."
+
+      - name: Configure AWS Credentials
+        if: github.ref == 'refs/heads/main' && env.AWS_ACCESS_KEY_ID != '' && env.AWS_SECRET_ACCESS_KEY != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-south-1
+
+      - name: Build & Deploy SAM Backend (Prod)
+        if: github.ref == 'refs/heads/main' && env.AWS_ACCESS_KEY_ID != '' && env.AWS_SECRET_ACCESS_KEY != ''
         run: |
+          cd infrastructure
+          sam build
           sam deploy \
-            -t infrastructure/template.yaml \
             --stack-name heatflood-guardian \
             --region ap-south-1 \
             --capabilities CAPABILITY_IAM \
@@ -133,28 +85,23 @@ jobs:
             --no-fail-on-empty-changeset \
             --parameter-overrides Stage=prod AllowedOrigins="*"
 
-      - name: Deploy Frontend to S3
+      - name: Configure production API URL for static frontend
+        if: github.ref == 'refs/heads/main' && env.AWS_ACCESS_KEY_ID != '' && env.AWS_SECRET_ACCESS_KEY != ''
         run: |
-          BUCKET_NAME=$(aws cloudformation describe-stacks \
-            --stack-name heatflood-guardian \
-            --query "Stacks[0].Outputs[?OutputKey=='FrontendBucketName'].OutputValue" \
-            --output text)
+          API_URL=$(aws cloudformation describe-stacks --stack-name heatflood-guardian --region ap-south-1 --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue | [0]" --output text)
+          if [ -z "$API_URL" ] || [ "$API_URL" = "None" ]; then echo "Could not resolve API URL from deployed stack"; exit 1; fi
+          echo "NEXT_PUBLIC_API_BASE_URL=$API_URL" >> "$GITHUB_ENV"
 
-          if [ -z "$BUCKET_NAME" ] || [ "$BUCKET_NAME" = "None" ]; then
-            echo "Frontend bucket not found"
-            exit 1
-          fi
+      - name: Build Frontend App
+        if: github.ref == 'refs/heads/main' && env.AWS_ACCESS_KEY_ID != '' && env.AWS_SECRET_ACCESS_KEY != ''
+        run: npm run build --workspace=apps/web
 
-          aws s3 sync apps/web/out "s3://${BUCKET_NAME}" --delete
-
-      - name: Invalidate CloudFront Cache
+      - name: Deploy Frontend to S3 & Invalidate CloudFront
+        if: github.ref == 'refs/heads/main' && env.AWS_ACCESS_KEY_ID != '' && env.AWS_SECRET_ACCESS_KEY != ''
         run: |
-          DIST_ID=$(aws cloudfront list-distributions \
-            --query "DistributionList.Items[?Comment=='HeatFlood Frontend Distribution' || contains(Origins.Items[0].DomainName, 'heatflood-frontend')].Id | [0]" \
-            --output text)
-
-          if [ -n "$DIST_ID" ] && [ "$DIST_ID" != "None" ]; then
-            aws cloudfront create-invalidation \
-              --distribution-id "$DIST_ID" \
-              --paths "/*"
+          DIST_ID=$(aws cloudfront list-distributions --query "DistributionList.Items[?Comment=='HeatFlood Frontend Distribution' || contains(Origins.Items[0].DomainName, 'heatflood-frontend')].Id | [0]" --output text)
+          BUCKET_NAME=$(aws cloudformation describe-stacks --stack-name heatflood-guardian --query "Stacks[0].Outputs[?OutputKey=='FrontendBucketName'].OutputValue" --output text)
+          aws s3 sync apps/web/out s3://$BUCKET_NAME --delete
+          if [ "$DIST_ID" != "None" ] && [ -n "$DIST_ID" ]; then
+            aws cloudfront create-invalidation --distribution-id $DIST_ID --paths "/*"
           fi

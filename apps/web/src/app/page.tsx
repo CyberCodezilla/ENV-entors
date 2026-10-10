@@ -1,207 +1,345 @@
-﻿'use client';
+/**
+ * Home page — Day 5 FINAL
+ *
+ * Changes from Day 4:
+ *   - MobileDrawer wraps sidebar (FAB on mobile, permanent on desktop)
+ *   - Skeleton cards shown while loading
+ *   - DataFreshnessFooter passed to RouteCard
+ *   - ErrorBoundary wraps Map and sidebar separately
+ *   - Accessible form labels and ARIA live region for results
+ *   - Outside-pilot-zone warning banner
+ */
+'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
-import dynamic from 'next/dynamic';
-import { SearchPanel } from '@/components/panel/SearchPanel';
-import { MetricLens } from '@/components/map/MetricLens';
-import MapSkeleton from '@/components/map/MapSkeleton';
-import { IncidentFeed } from '@/components/incidents/IncidentFeed';
-import { ReportModal } from '@/components/incidents/ReportModal';
-import { ReplayTheater } from '@/components/replay/ReplayTheater';
-import { TimeScrubber } from '@/components/panel/TimeScrubber';
-import { WeatherPulse } from '@/components/status/WeatherPulse';
-import { HealthChip } from '@/components/status/HealthChip';
-import { ModeratorGate } from '@/components/moderation/ModeratorGate';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import type { AnalyseRoutesResponse } from '@heatflood/shared';
+import { PILOT_BBOX, isInsidePilotZone } from '@heatflood/shared';
+import { api } from '@/lib/apiClient';
+import { RouteCard } from '@/components/RouteCard';
+import { WeatherBanner } from '@/components/WeatherBanner';
+import { DemoBanner } from '@/components/DemoBanner';
+import { NoRouteState } from '@/components/NoRouteState';
+import { Map, MapIncident } from '@/components/Map';
+import { ReportIncidentModal } from '@/components/ReportIncidentModal';
+import { SkeletonCard, SkeletonWeatherBanner } from '@/components/SkeletonCard';
+import { MobileDrawer } from '@/components/MobileDrawer';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 
-import { useAppStore } from '@/lib/store/useAppStore';
-import { useViewportIncidents } from '@/lib/hooks/useViewportIncidents';
-import { useOnline } from '@/lib/hooks/useOnline';
-import { HexBadge } from '@/components/ui/HexBadge';
-import { Shield, Film, WifiOff } from 'lucide-react';
-
-const MapView = dynamic(() => import('@/components/map/MapView'), {
-  ssr: false,
-  loading: () => <MapSkeleton />,
-});
+const POLL_INTERVAL_MS = 60_000;
 
 export default function HomePage() {
-  const { viewportIncidents, analysis, selectRoute, selectSegment } = useAppStore();
-  const isOnline = useOnline();
+  const [originLat, setOriginLat]   = useState('19.1120');
+  const [originLon, setOriginLon]   = useState('72.8320');
+  const [destLat, setDestLat]       = useState('19.1380');
+  const [destLon, setDestLon]       = useState('72.8550');
+  const [mode, setMode]             = useState<'walking' | 'driving-traffic'>('walking');
+  const [heatSensitive, setHeatSensitive] = useState(false);
 
-  const [activeBbox, setActiveBbox] = useState<[number, number, number, number] | null>(null);
+  const [loading, setLoading]           = useState(false);
+  const [error, setError]               = useState<string | null>(null);
+  const [result, setResult]             = useState<AnalyseRoutesResponse | null>(null);
+  const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
+  const [outsidePilot, setOutsidePilot] = useState(false);
+
+  const [incidents, setIncidents]       = useState<MapIncident[]>([]);
+  const bboxRef                         = useRef<[number, number, number, number] | null>(null);
+
   const [reportCoords, setReportCoords] = useState<{ lat: number; lon: number } | null>(null);
-  const [isReplayOpen, setIsReplayOpen] = useState(false);
+  const [showReportSuccess, setShowReportSuccess] = useState(false);
+
+  // ---- Incident polling ----
+  const fetchIncidents = useCallback(async () => {
+    if (!bboxRef.current) return;
+    const [lngMin, latMin, lngMax, latMax] = bboxRef.current;
+    try {
+      const res = await api.getIncidents(lngMin, latMin, lngMax, latMax);
+      setIncidents(prev => {
+        const fetchedIds = new Set(res.incidents.map(i => (i as { incidentId: string }).incidentId));
+        const optimisticPending = prev.filter(i => i.isOptimistic && !fetchedIds.has(i.incidentId));
+        return [...(res.incidents as MapIncident[]), ...optimisticPending];
+      });
+    } catch { /* fail silently */ }
+  }, []);
+
+  useEffect(() => {
+    const id = setInterval(fetchIncidents, POLL_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [fetchIncidents]);
 
   const handleBboxChange = useCallback((bbox: [number, number, number, number]) => {
-    setActiveBbox(bbox);
-  }, []);
+    bboxRef.current = bbox;
+    fetchIncidents();
+  }, [fetchIncidents]);
 
-  const handleRequestReport = useCallback((lat: number, lon: number) => {
-    setReportCoords({ lat, lon });
-  }, []);
-
-  // Viewport polling hook (20s interval, clamped to <= 0.25 deg)
-  useViewportIncidents(activeBbox);
-
-  // Keyboard Navigation Shortcuts per Section 12 (WCAG 2.1 AA)
+  // ---- Pilot zone check ----
   useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      // Ignore if user is currently typing in an input or textarea
-      const target = e.target as HTMLElement;
-      const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT';
+    const oLat = parseFloat(originLat), oLon = parseFloat(originLon);
+    const dLat = parseFloat(destLat),   dLon = parseFloat(destLon);
+    if (!isNaN(oLat) && !isNaN(dLat)) {
+      const originIn = isInsidePilotZone(oLat, oLon, PILOT_BBOX);
+      const destIn   = isInsidePilotZone(dLat, dLon, PILOT_BBOX);
+      setOutsidePilot(!originIn && !destIn);
+    }
+  }, [originLat, originLon, destLat, destLon]);
 
-      // '/' focuses origin search input
-      if (e.key === '/' && !isInput) {
-        e.preventDefault();
-        const originInput = document.querySelector('input[placeholder*="origin"]') as HTMLInputElement;
-        originInput?.focus();
-        return;
-      }
+  // ---- Route analysis ----
+  async function handleAnalyse(e: React.FormEvent) {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+    setResult(null);
+    try {
+      const res = await api.analyseRoutes({
+        origin:      { lat: parseFloat(originLat), lon: parseFloat(originLon) },
+        destination: { lat: parseFloat(destLat),   lon: parseFloat(destLon) },
+        mode,
+        departureTime: new Date().toISOString(),
+        heatSensitive,
+        isReplay: false,
+      });
+      setResult(res);
+      setSelectedRouteId(res.routes[0]?.routeId ?? null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setLoading(false);
+    }
+  }
 
-      // 'Escape' closes modal -> drawer -> theater
-      if (e.key === 'Escape') {
-        if (reportCoords !== null) {
-          setReportCoords(null);
-          return;
-        }
-        if (isReplayOpen) {
-          setIsReplayOpen(false);
-          return;
-        }
-        if (analysis.selectedSegmentIndex !== null) {
-          selectSegment(null);
-          return;
-        }
-      }
+  async function loadDemo(scenarioId: string) {
+    setLoading(true);
+    setError(null);
+    try {
+      const scenario = await api.getDemoScenario(scenarioId);
+      const res = await api.analyseRoutes({ ...scenario, isReplay: true, scenarioId });
+      setResult(res);
+      setSelectedRouteId(res.routes[0]?.routeId ?? null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setLoading(false);
+    }
+  }
 
-      // Arrow keys cycle routes
-      if (!isInput && analysis.data?.routes && analysis.data.routes.length > 1) {
-        const routes = analysis.data.routes;
-        const currentIdx = routes.findIndex((r) => r.routeId === analysis.selectedRouteId);
+  function handleReportSuccess(
+    incidentId: string,
+    details?: { latitude: number; longitude: number; type: string; depthCategory: string; status: string }
+  ) {
+    setReportCoords(null);
+    setShowReportSuccess(true);
+    setTimeout(() => setShowReportSuccess(false), 4000);
 
-        if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
-          e.preventDefault();
-          const nextIdx = (currentIdx + 1) % routes.length;
-          selectRoute(routes[nextIdx].routeId);
-        } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
-          e.preventDefault();
-          const prevIdx = (currentIdx - 1 + routes.length) % routes.length;
-          selectRoute(routes[prevIdx].routeId);
-        }
-      }
+    if (details) {
+      const optimisticIncident: MapIncident = {
+        incidentId,
+        latitude: details.latitude,
+        longitude: details.longitude,
+        type: details.type,
+        depthCategory: details.depthCategory,
+        status: details.status || 'queued',
+        observedAt: new Date().toISOString(),
+        isOptimistic: true,
+      };
+      setIncidents(prev => [optimisticIncident, ...prev.filter(i => i.incidentId !== incidentId)]);
     }
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [reportCoords, isReplayOpen, analysis, selectSegment, selectRoute]);
+    fetchIncidents();
+  }
 
+  // ---- Sidebar content (shared between desktop + mobile drawer) ----
+  const sidebarContent = (
+    <div className="flex flex-col gap-3">
+      {/* Route form */}
+      <form onSubmit={handleAnalyse} className="flex flex-col gap-3">
+        <p className="text-xs text-gray-500">Click map to report a hazard · Analyse to compare routes</p>
 
-  // Ambient skin mode calculation (M1)
-  const weather = analysis.data?.weather;
-  const isRain = (weather?.precipitationMm ?? 0) >= 7.5;
-  const isExtremeHeat = (weather?.apparentTemperatureC ?? 0) >= 36;
-  const weatherSkin = isRain ? 'flood' : isExtremeHeat ? 'hot' : 'calm';
+        {outsidePilot && (
+          <div className="rounded-lg bg-yellow-900/30 border border-yellow-700 text-yellow-200 text-xs px-3 py-2">
+            ⚠️ These coordinates are outside the Mumbai pilot zone (Andheri West / Versova).
+            Results will have limited data support.
+          </div>
+        )}
 
-  return (
-    <main
-      data-weather={weatherSkin}
-      className="w-screen h-screen relative flex flex-col bg-void text-ink overflow-hidden select-none font-sans"
-    >
-      {/* Offline Banner (Section 9.3) */}
-      {!isOnline && (
-        <div
-          role="alert"
-          className="absolute top-0 left-0 right-0 z-50 bg-risk-4/90 text-white text-xs py-1 px-4 flex items-center justify-center gap-2 shadow-md animate-in fade-in"
+        <fieldset className="flex flex-col gap-1">
+          <legend className="text-xs text-gray-500 mb-1">Origin (lat, lon)</legend>
+          <div className="flex gap-2">
+            <input
+              aria-label="Origin latitude"
+              value={originLat} onChange={e => setOriginLat(e.target.value)}
+              className="flex-1 bg-gray-800 text-white text-sm rounded px-2 py-1.5 border border-gray-700"
+              placeholder="lat"
+            />
+            <input
+              aria-label="Origin longitude"
+              value={originLon} onChange={e => setOriginLon(e.target.value)}
+              className="flex-1 bg-gray-800 text-white text-sm rounded px-2 py-1.5 border border-gray-700"
+              placeholder="lon"
+            />
+          </div>
+        </fieldset>
+
+        <fieldset className="flex flex-col gap-1">
+          <legend className="text-xs text-gray-500 mb-1">Destination (lat, lon)</legend>
+          <div className="flex gap-2">
+            <input
+              aria-label="Destination latitude"
+              value={destLat} onChange={e => setDestLat(e.target.value)}
+              className="flex-1 bg-gray-800 text-white text-sm rounded px-2 py-1.5 border border-gray-700"
+              placeholder="lat"
+            />
+            <input
+              aria-label="Destination longitude"
+              value={destLon} onChange={e => setDestLon(e.target.value)}
+              className="flex-1 bg-gray-800 text-white text-sm rounded px-2 py-1.5 border border-gray-700"
+              placeholder="lon"
+            />
+          </div>
+        </fieldset>
+
+        <div className="flex gap-4 items-center">
+          <label htmlFor="mode" className="sr-only">Travel mode</label>
+          <select
+            id="mode"
+            value={mode} onChange={e => setMode(e.target.value as typeof mode)}
+            className="bg-gray-800 text-white text-sm rounded px-2 py-1 border border-gray-700"
+          >
+            <option value="walking">Walking</option>
+            <option value="driving-traffic">Driving</option>
+          </select>
+          <label className="text-xs text-gray-400 flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={heatSensitive}
+              onChange={e => setHeatSensitive(e.target.checked)}
+              className="rounded"
+            />
+            Heat sensitive
+          </label>
+        </div>
+
+        <button
+          type="submit"
+          disabled={loading}
+          className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-semibold py-2 rounded-lg text-sm transition"
         >
-          <WifiOff className="w-3.5 h-3.5" />
-          <span>Offline — Guardian will sync the moment you reconnect.</span>
+          {loading ? 'Analysing…' : 'Analyse Routes'}
+        </button>
+      </form>
+
+      {/* Error */}
+      {error && (
+        <div role="alert" className="rounded-lg bg-red-900/40 border border-red-700 text-red-200 p-3 text-sm">
+          {error}
         </div>
       )}
 
-
-      {/* Visually-hidden route summary for Screen Readers per Section 12 */}
-      <div className="sr-only" aria-live="polite">
-        {analysis.phase === 'analysing' && 'Analyzing routes for environmental hazards...'}
-        {analysis.phase === 'success' && analysis.data && (
-          <div>
-            Route analysis complete. Found {analysis.data.routes.length} candidate routes.
-            Recommended route 1: {(analysis.data.routes[0].distanceM / 1000).toFixed(1)} km,
-            Flood risk: {analysis.data.routes[0].overallFloodLevel},
-            Heat risk: {analysis.data.routes[0].overallHeatLevel}.
-          </div>
-        )}
-      </div>
-
-      {/* Top Floating Cockpit Glass Header */}
-      <header className="absolute top-3 left-3 right-3 z-30 pointer-events-none flex items-center justify-between">
-        {/* Brand Logo & Title */}
-        <div className="pointer-events-auto glass-panel px-3.5 py-2 rounded-md flex items-center gap-2.5 shadow-glass">
-          <HexBadge size="sm" variant="brand">
-            <Shield className="w-3.5 h-3.5 text-void fill-void" />
-          </HexBadge>
-          <div className="flex flex-col">
-            <h1 className="font-display font-bold text-sm tracking-tight text-ink flex items-center gap-1.5">
-              <span>HeatFlood Guardian</span>
-              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-xs bg-raised border border-line text-flood font-semibold">
-                MUMBAI
-              </span>
-            </h1>
-            <span className="text-[10px] font-mono text-ink-3">
-              Instrumented Navigation Cockpit · v0.1.0
-            </span>
-          </div>
+      {/* Loading skeletons */}
+      {loading && (
+        <div aria-live="polite" aria-busy="true" className="flex flex-col gap-2">
+          <SkeletonWeatherBanner />
+          <SkeletonCard />
+          <SkeletonCard />
         </div>
+      )}
 
-        {/* Top-Right Cockpit Chips & Replay Shortcuts */}
-        <div className="pointer-events-auto flex items-center gap-2">
-          {/* Replay Theater Modal Trigger (M6) */}
-          <button
-            onClick={() => setIsReplayOpen(true)}
-            className="glass-panel px-3 py-1.5 rounded-md flex items-center gap-1.5 text-xs font-mono font-bold text-heat hover:border-heat/60 hover:bg-heat/10 shadow-glass transition"
-          >
-            <Film className="w-3.5 h-3.5 text-heat" />
-            <span>Replay Theater 🎬</span>
-          </button>
+      {/* Results */}
+      {result && !loading && (
+        <div aria-live="polite" className="flex flex-col gap-2">
+          {result.isReplay && <DemoBanner scenarioId={result.scenarioId} />}
+          <WeatherBanner weather={result.weather} isReplay={result.isReplay} />
 
-          {/* Real-time Weather Pulse */}
-          <WeatherPulse />
+          {!result.hasConfidentRecommendation ? (
+            <NoRouteState reason={result.noConfidentRouteReason} isReplay={result.isReplay} />
+          ) : (
+            result.routes.map(route => (
+              <RouteCard
+                key={route.routeId}
+                route={route}
+                isSelected={selectedRouteId === route.routeId}
+                onSelect={() => setSelectedRouteId(route.routeId)}
+                isReplay={result.isReplay}
+                freshness={result.dataFreshness}
+              />
+            ))
+          )}
 
-          {/* Diagnostic Health Chip */}
-          <HealthChip />
-          <ModeratorGate />
+          <p className="text-[10px] text-gray-600">
+            ID: {result.requestId} · {new Date(result.processedAt).toLocaleTimeString()}
+          </p>
+        </div>
+      )}
+
+      {incidents.length > 0 && (
+        <p className="text-xs text-gray-500 text-center">
+          {incidents.length} active hazard{incidents.length !== 1 ? 's' : ''} in map view
+        </p>
+      )}
+    </div>
+  );
+
+  return (
+    <main className="min-h-screen bg-gray-950 text-white flex flex-col h-screen overflow-hidden">
+
+      {/* Header */}
+      <header className="bg-gray-900 border-b border-gray-800 px-4 md:px-6 py-3 flex items-center justify-between flex-shrink-0">
+        <div>
+          <h1 className="text-base md:text-lg font-bold">🌊 HeatFlood Guardian</h1>
+          <p className="text-[11px] text-gray-400 hidden sm:block">Mumbai pilot — Andheri West / Versova</p>
+        </div>
+        <div className="flex gap-1.5 md:gap-2 items-center"><a href="/command-center/" className="text-xs bg-teal-800 hover:bg-teal-700 text-teal-50 px-2 py-1 rounded-lg transition" aria-label="Open disaster response command center">Command Center</a>
+          <span className="text-xs text-gray-500 hidden lg:block">Demo:</span>
+          {['heat', 'flood', 'compound'].map(id => (
+            <button
+              key={id}
+              onClick={() => loadDemo(id)}
+              disabled={loading}
+              className="text-xs bg-yellow-800 hover:bg-yellow-700 disabled:opacity-50 text-yellow-100 px-2 py-1 rounded-lg transition"
+            >
+              {id}
+            </button>
+          ))}
         </div>
       </header>
 
-      {/* Main Cockpit Layout: Floating Left SearchPanel + Full-Bleed Map */}
-      <div className="w-full h-full relative flex">
-        {/* Floating Search Panel */}
-        <div className="absolute top-16 bottom-3 left-3 z-20 flex max-h-[calc(100vh-80px)]">
-          <SearchPanel />
+      {/* Toast */}
+      {showReportSuccess && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="absolute top-16 left-1/2 -translate-x-1/2 z-50 bg-green-800 text-white text-sm px-4 py-2 rounded-full shadow-lg"
+        >
+          ✓ Hazard report submitted
         </div>
+      )}
 
-        {/* Full-Bleed Mapbox Viewport */}
-        <div className="w-full h-full relative z-0">
-          <MapView
-            onBboxChange={handleBboxChange}
-            onRequestReport={handleRequestReport}
-          />
-          <MetricLens />
-          <TimeScrubber />
-          <IncidentFeed incidents={viewportIncidents.items} />
+      <div className="flex flex-1 overflow-hidden relative">
+
+        {/* MobileDrawer wraps sidebar — shows FAB on mobile, permanent column on desktop */}
+        <MobileDrawer routeCount={result?.routes?.length}>
+          {sidebarContent}
+        </MobileDrawer>
+
+        {/* Map */}
+        <div className="flex-1 relative">
+          <ErrorBoundary label="Map">
+            <Map
+              routes={result?.routes ?? []}
+              selectedRouteId={selectedRouteId}
+              incidents={incidents}
+              onBboxChange={handleBboxChange}
+              onRequestReport={(lat, lon) => setReportCoords({ lat, lon })}
+            />
+          </ErrorBoundary>
         </div>
       </div>
 
-      {/* Disaster Replay Theater Modal (M6) */}
-      <ReplayTheater
-        isOpen={isReplayOpen}
-        onClose={() => setIsReplayOpen(false)}
-      />
-
-      {/* Report Hazard Modal (M9) */}
+      {/* Report modal */}
       {reportCoords && (
-        <ReportModal
-          coords={reportCoords}
+        <ReportIncidentModal
+          lat={reportCoords.lat}
+          lon={reportCoords.lon}
           onClose={() => setReportCoords(null)}
+          onSuccess={handleReportSuccess}
         />
       )}
     </main>
