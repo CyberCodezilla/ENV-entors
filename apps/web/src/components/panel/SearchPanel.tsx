@@ -29,12 +29,12 @@ export function SearchPanel() {
         <div className="flex items-center justify-between p-2 rounded-md bg-risk-1/20 border border-risk-1/50 text-risk-1 text-xs font-mono font-bold animate-in fade-in">
           <div className="flex items-center gap-1.5">
             <Film className="w-3.5 h-3.5" />
-            <span>REPLAY: {replay.scenarioId?.toUpperCase()}</span>
+            <span>SIMULATION ACTIVE: {replay.scenarioId?.toUpperCase()}</span>
           </div>
           <button
             onClick={exitReplay}
-            title="Exit disaster replay"
-            aria-label="Exit disaster replay"
+            title="Exit simulation mode"
+            aria-label="Exit simulation mode"
             className="text-risk-1 hover:text-white p-0.5 rounded transition"
           >
             <X className="w-4 h-4" />

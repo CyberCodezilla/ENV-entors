@@ -39,6 +39,8 @@ export interface AppState {
     selectedSegmentIndex: number | null;
   };
 
+  isSimulationOpen: boolean;
+  setSimulationOpen: (open: boolean) => void;
   replay: {
     active: boolean;
     scenarioId: 'heat' | 'flood' | 'compound' | null;
@@ -70,7 +72,7 @@ export interface AppState {
   selectSegment: (segmentIndex: number | null) => void;
 
   analyse: (signal?: AbortSignal) => Promise<void>;
-  startReplay: (scenarioId: 'heat' | 'flood' | 'compound', signal?: AbortSignal) => Promise<void>;
+  startReplay: (scenarioId: 'heat' | 'flood' | 'compound', customLocations?: { origin: Place; destination: Place }, signal?: AbortSignal) => Promise<void>;
   exitReplay: () => void;
 
   setViewportIncidents: (items: Incident[], bbox: Bbox) => void;
@@ -107,6 +109,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     selectedSegmentIndex: null,
   },
 
+  isSimulationOpen: false,
+  setSimulationOpen: (open) => set({ isSimulationOpen: open }),
   replay: {
     active: false,
     scenarioId: null,
@@ -206,7 +210,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  startReplay: async (scenarioId, externalSignal) => {
+  startReplay: async (scenarioId, customLocations, externalSignal) => {
     if (activeAnalyseController) {
       activeAnalyseController.abort();
     }
@@ -220,19 +224,32 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     try {
       const fixture = await api.getDemoScenario(scenarioId, signal);
-      // Update form inputs to match scenario
+
+      const org: Place = customLocations?.origin ?? {
+        name: 'Versova Beach, Andheri West',
+        lat: fixture.origin.lat,
+        lon: fixture.origin.lon,
+      };
+
+      const dst: Place = customLocations?.destination ?? {
+        name: 'Andheri Metro Station, SV Road',
+        lat: fixture.destination.lat,
+        lon: fixture.destination.lon,
+      };
+
       set({
-        origin: { name: 'Scenario Origin', ...fixture.origin },
-        destination: { name: 'Scenario Destination', ...fixture.destination },
+        origin: org,
+        destination: dst,
         mode: fixture.mode,
         departureTime: fixture.departureTime,
         heatSensitive: fixture.heatSensitive ?? false,
       });
 
-      // Submit fixture verbatim per Appendix B.3
       const data = await api.analyseRoutes(
         {
           ...fixture,
+          origin: { lat: org.lat, lon: org.lon },
+          destination: { lat: dst.lat, lon: dst.lon },
           isReplay: true,
           scenarioId,
         },

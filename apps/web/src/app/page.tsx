@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
 import dynamic from 'next/dynamic';
@@ -17,7 +17,7 @@ import { useAppStore } from '@/lib/store/useAppStore';
 import { useViewportIncidents } from '@/lib/hooks/useViewportIncidents';
 import { useOnline } from '@/lib/hooks/useOnline';
 import { HexBadge } from '@/components/ui/HexBadge';
-import { Shield, Film, WifiOff } from 'lucide-react';
+import { Shield, Play, WifiOff } from 'lucide-react';
 
 const MapView = dynamic(() => import('@/components/map/MapView'), {
   ssr: false,
@@ -25,12 +25,18 @@ const MapView = dynamic(() => import('@/components/map/MapView'), {
 });
 
 export default function HomePage() {
-  const { viewportIncidents, analysis, selectRoute, selectSegment } = useAppStore();
+  const {
+    viewportIncidents,
+    analysis,
+    selectRoute,
+    selectSegment,
+    isSimulationOpen,
+    setSimulationOpen,
+  } = useAppStore();
   const isOnline = useOnline();
 
   const [activeBbox, setActiveBbox] = useState<[number, number, number, number] | null>(null);
   const [reportCoords, setReportCoords] = useState<{ lat: number; lon: number } | null>(null);
-  const [isReplayOpen, setIsReplayOpen] = useState(false);
 
   const handleBboxChange = useCallback((bbox: [number, number, number, number]) => {
     setActiveBbox(bbox);
@@ -64,8 +70,8 @@ export default function HomePage() {
           setReportCoords(null);
           return;
         }
-        if (isReplayOpen) {
-          setIsReplayOpen(false);
+        if (isSimulationOpen) {
+          setSimulationOpen(false);
           return;
         }
         if (analysis.selectedSegmentIndex !== null) {
@@ -93,7 +99,7 @@ export default function HomePage() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [reportCoords, isReplayOpen, analysis, selectSegment, selectRoute]);
+  }, [reportCoords, isSimulationOpen, setSimulationOpen, analysis, selectSegment, selectRoute]);
 
 
   // Ambient skin mode calculation (M1)
@@ -154,13 +160,14 @@ export default function HomePage() {
 
         {/* Top-Right Cockpit Chips & Replay Shortcuts */}
         <div className="pointer-events-auto flex items-center gap-2">
-          {/* Replay Theater Modal Trigger (M6) */}
+          {/* Simulation Suite Trigger Button */}
           <button
-            onClick={() => setIsReplayOpen(true)}
-            className="glass-panel px-3 py-1.5 rounded-md flex items-center gap-1.5 text-xs font-mono font-bold text-heat hover:border-heat/60 hover:bg-heat/10 shadow-glass transition"
+            onClick={() => setSimulationOpen(true)}
+            title="Run realistic extreme weather and disaster simulations"
+            className="glass-panel px-3 py-1.5 rounded-md flex items-center gap-2 text-xs font-mono font-bold text-heat hover:border-heat/60 hover:bg-heat/15 shadow-glass transition group"
           >
-            <Film className="w-3.5 h-3.5 text-heat" />
-            <span>Replay Theater 🎬</span>
+            <Play className="w-3.5 h-3.5 text-heat fill-heat group-hover:scale-110 transition-transform" />
+            <span>Run Simulation</span>
           </button>
 
           {/* Real-time Weather Pulse */}
@@ -192,10 +199,7 @@ export default function HomePage() {
       </div>
 
       {/* Disaster Replay Theater Modal (M6) */}
-      <ReplayTheater
-        isOpen={isReplayOpen}
-        onClose={() => setIsReplayOpen(false)}
-      />
+      <ReplayTheater />
 
       {/* Report Hazard Modal (M9) */}
       {reportCoords && (
