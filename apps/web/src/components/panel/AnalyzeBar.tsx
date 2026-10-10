@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import React from 'react';
 import { useAppStore } from '@/lib/store/useAppStore';
@@ -22,8 +22,17 @@ export function AnalyzeBar() {
   const isAnalyzing = analysis.phase === 'analysing';
   const canAnalyze = origin !== null && destination !== null;
 
+  // Set initial departure time on client mount to avoid Next.js hydration error (#418)
+  React.useEffect(() => {
+    if (!departureTime) {
+      setDepartureTime(new Date().toISOString());
+    }
+  }, [departureTime, setDepartureTime]);
+
   // Format departure ISO string to local input value (YYYY-MM-DDTHH:mm)
-  const localDateTimeValue = new Date(departureTime).toISOString().slice(0, 16);
+  const localDateTimeValue = departureTime 
+    ? new Date(departureTime).toISOString().slice(0, 16)
+    : '';
 
   function handleDepartureChange(e: React.ChangeEvent<HTMLInputElement>) {
     const localVal = e.target.value;

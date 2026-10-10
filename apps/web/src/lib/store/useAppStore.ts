@@ -1,4 +1,4 @@
-﻿import { create } from 'zustand';
+import { create } from 'zustand';
 import type {
   Place,
   AnalyseResponse,
@@ -94,7 +94,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     lon: 72.855,
   },
   mode: 'walking',
-  departureTime: new Date().toISOString(),
+  departureTime: '', // Will be set on client mount to avoid hydration mismatch
   heatSensitive: false,
   metricLens: 'dominant',
   mapPickingTarget: null,

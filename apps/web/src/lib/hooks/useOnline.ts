@@ -1,13 +1,13 @@
-﻿'use client';
+'use client';
 
 import { useState, useEffect } from 'react';
 
 export function useOnline() {
-  const [isOnline, setIsOnline] = useState(
-    typeof navigator !== 'undefined' ? navigator.onLine : true
-  );
+  const [isOnline, setIsOnline] = useState(true);
 
   useEffect(() => {
+    setIsOnline(typeof navigator !== 'undefined' ? navigator.onLine : true);
+
     function handleOnline() {
       setIsOnline(true);
     }
