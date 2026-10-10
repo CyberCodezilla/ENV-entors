@@ -58,7 +58,7 @@ jobs:
         uses: aws-actions/setup-sam@v2
 
       - name: Validate SAM Infrastructure Template
-        run: sam validate -t infrastructure/template.yaml
+        run: sam validate --region ap-south-1 -t infrastructure/template.yaml
 
       - name: Explain deployment prerequisites
         if: github.ref == 'refs/heads/main' && (env.AWS_ACCESS_KEY_ID == '' || env.AWS_SECRET_ACCESS_KEY == '')
