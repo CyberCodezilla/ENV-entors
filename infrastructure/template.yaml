@@ -387,6 +387,7 @@ Resources:
           - X-Request-Id
           - Authorization
       Auth:
+        DefaultAuthorizer: CognitoAuthorizer
         Authorizers:
           CognitoAuthorizer:
             AuthorizationScopes:
