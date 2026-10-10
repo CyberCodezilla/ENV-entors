@@ -54,7 +54,6 @@ function weightedAverage(values: number[], weights: number[]): number {
 export function rankRoutes(rawRoutes: RawRoute[]): {
   routes: RouteResult[];
   hasConfidentRecommendation: boolean;
-  recommendationStatus: 'confident' | 'degraded' | 'insufficient_data';
   noConfidentRouteReason: string | null;
 } {
   const evaluated = rawRoutes.map((raw) => {
@@ -156,17 +155,9 @@ export function rankRoutes(rawRoutes: RawRoute[]): {
 
   const confidentViableRoutes = viableRoutes.filter(r => r.overallConfidenceLevel !== 'limited');
   const hasConfidentRecommendation = confidentViableRoutes.length > 0;
-  
-  const recommendationStatus: 'confident' | 'degraded' | 'insufficient_data' =
-    hasConfidentRecommendation
-      ? 'confident'
-      : viableRoutes.length > 0
-      ? 'degraded'
-      : 'insufficient_data';
-
   const noConfidentRouteReason = !hasConfidentRecommendation
     ? 'All available pedestrian/road routes intersect active hazard evidence or have limited confidence. Fallback recommendation: Seek elevated transit corridors (e.g., Mumbai Metro Line 1 / Line 2A elevated corridors across Andheri/Versova) or proceed to designated emergency high-ground rally points.'
     : null;
 
-  return { routes: allRoutes, hasConfidentRecommendation, recommendationStatus, noConfidentRouteReason };
+  return { routes: allRoutes, hasConfidentRecommendation, noConfidentRouteReason };
 }

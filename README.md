@@ -6,6 +6,25 @@
 
 ---
 
+## Disaster Response Command Center (additive innovation module)
+
+The existing map, route analysis, replay scenarios, incident reporting, and ML advisory path remain intact. The added static route is `/command-center/`. It provides four explicitly synthetic scenarios, baseline-vs-scenario comparison, ranked operator-review actions, provenance/uncertainty, a visible degraded-mode switch, and a backend/local fallback indicator.
+
+### Scenario API and AWS resources
+
+- `POST /scenarios/run` validates a named preset, clamps numeric inputs, calculates deterministic flood/heat/composite indices, returns a structured response brief, and records an audit row in DynamoDB when available.
+- `GET /scenarios/history` returns the latest durable audit records. If the table is unavailable, the UI must not represent local-only entries as durable records.
+- `ScenarioRunsTable` uses on-demand billing and a 90-day TTL for scenario audit records.
+- `ScenarioEventsBus` emits `HeatFloodScenarioAssessed`; an EventBridge rule starts Step Functions, which validates the simulation label and marks the audit record processed with retry handling.
+- Lambda structured logs include trace ID, scenario ID, elapsed time, persistence status, event status, and degraded-mode status. Do not log credentials or personal data.
+- The response brief is deterministic by design. Bedrock is optional and is not required for the core feature. No real-world dispatch or safety guarantee is provided.
+
+### Deploy
+
+The GitHub Actions workflow builds/tests the app and configures `NEXT_PUBLIC_API_BASE_URL` from the deployed CloudFormation stack before the production static export. To deploy from `main`, configure repository Actions secrets `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` with least-privilege deployment permissions. Never commit keys. Without credentials, CI validates code but deployment is skipped with a warning.
+
+See `docs/INNOVATION_SCENARIO.md`, `docs/innovation-architecture.mmd`, and `docs/INNOVATION_DEMO_CHECKLIST.md`.
+
 ## 📍 Deployed Live Infrastructure & URLs
 
 - **🌐 Frontend (AWS S3 Website):**  

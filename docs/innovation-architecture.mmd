@@ -1,0 +1,14 @@
+flowchart LR
+  U[Operator / Judge] --> UI[Static Next.js Command Center on S3 / CloudFront]
+  UI -->|POST scenario / GET history| API[API Gateway HTTP API]
+  API --> L[Scenario Lambda: validate + deterministic assess + response brief]
+  L --> D[(DynamoDB ScenarioRunsTable)]
+  L -->|HeatFloodScenarioAssessed| EB[EventBridge scenario bus]
+  EB --> R[EventBridge rule]
+  R --> SF[Step Functions Standard workflow]
+  SF --> T[Workflow Task Lambda]
+  T -->|Mark processed, retry-safe| D
+  L --> CW[CloudWatch structured logs + Lambda metrics]
+  T --> CW
+  L -. ML unavailable .-> F[Deterministic fallback]
+  F --> UI

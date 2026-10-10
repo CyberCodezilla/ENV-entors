@@ -35,7 +35,7 @@ make deploy
 # SAM will:
 #   - Create S3 bucket for deployment artefacts
 #   - Deploy CloudFormation stack: heatflood-guardian
-#   - Create 2 DynamoDB tables, 5 Lambda functions, HTTP API Gateway
+#   - Create incident/hotspot/scenario tables, Lambda functions, HTTP API Gateway, EventBridge bus/rule, and Step Functions workflow
 ```
 
 Note the `ApiUrl` output — you will need it for Step 5.

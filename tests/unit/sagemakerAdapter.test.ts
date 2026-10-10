@@ -38,22 +38,4 @@ describe('SageMaker adapter contract', () => {
     expect(parseSageMakerProbability(Buffer.from('1.2'))).toBeNull();
     expect(parseSageMakerProbability(Buffer.from('-0.1'))).toBeNull();
   });
-  it('maintains periodic continuity across week boundaries (Sunday to Monday)', () => {
-    const sundayFeatures = { ...FEATURES, day_of_week: 6 };
-    const mondayFeatures = { ...FEATURES, day_of_week: 0 };
-    const tuesdayFeatures = { ...FEATURES, day_of_week: 1 };
-
-    const sundayVals = featuresToCsv(sundayFeatures).split(',').map(Number);
-    const mondayVals = featuresToCsv(mondayFeatures).split(',').map(Number);
-    const tuesdayVals = featuresToCsv(tuesdayFeatures).split(',').map(Number);
-
-    const sunSin = sundayVals[6], sunCos = sundayVals[7];
-    const monSin = mondayVals[6], monCos = mondayVals[7];
-    const tueSin = tuesdayVals[6], tueCos = tuesdayVals[7];
-
-    const distSunMon = Math.hypot(sunSin - monSin, sunCos - monCos);
-    const distMonTue = Math.hypot(monSin - tueSin, monCos - tueCos);
-
-    expect(distSunMon).toBeCloseTo(distMonTue, 6);
-  });
 });

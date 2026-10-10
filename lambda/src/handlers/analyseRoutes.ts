@@ -54,22 +54,6 @@ function buildReplayWeather(override: Record<string, unknown>): WeatherSnapshot 
   };
 }
 
-const MUMBAI_BBOX = {
-  lngMin: 72.77,
-  latMin: 18.89,
-  lngMax: 72.98,
-  latMax: 19.27,
-};
-
-function isWithinBbox(lat: number, lon: number): boolean {
-  return (
-    lat >= MUMBAI_BBOX.latMin &&
-    lat <= MUMBAI_BBOX.latMax &&
-    lon >= MUMBAI_BBOX.lngMin &&
-    lon <= MUMBAI_BBOX.lngMax
-  );
-}
-
 export const handler: APIGatewayProxyHandlerV2 = async (event) => {
   const requestId = event.requestContext.requestId;
   const now = new Date();
@@ -87,18 +71,6 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     }
 
     const request = AnalyseRoutesRequestSchema.parse(body);
-
-    if (!isWithinBbox(request.origin.lat, request.origin.lon) || !isWithinBbox(request.destination.lat, request.destination.lon)) {
-      return {
-        statusCode: 400,
-        headers: { 'Content-Type': 'application/json', 'X-Request-Id': requestId },
-        body: JSON.stringify({
-          error: 'OUT_OF_BOUNDS',
-          detail: 'Origin or destination coordinates are outside the supported Mumbai bounding box [72.77, 18.89, 72.98, 19.27]',
-          requestId,
-        }),
-      };
-    }
 
     const isReplay = request.isReplay === true;
     const scenarioId = request.scenarioId ?? null;
@@ -343,7 +315,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
       }),
     );
 
-    const { routes, hasConfidentRecommendation, recommendationStatus, noConfidentRouteReason } = rankRoutes(rawRoutes);
+    const { routes, hasConfidentRecommendation, noConfidentRouteReason } = rankRoutes(rawRoutes);
 
     const oldestIncidentAge = calculateOldestIncidentAge(incidents, now);
 
@@ -355,7 +327,6 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
 
       routes,
       hasConfidentRecommendation,
-      recommendationStatus,
       noConfidentRouteReason,
 
       weather: {

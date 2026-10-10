@@ -10,7 +10,8 @@
     "@aws-sdk/client-sagemaker-runtime": "^3.1146.0",
     "@heatflood/shared": "*",
     "uuid": "^9.0.0",
-    "zod": "^3.23.8"
+    "zod": "^3.23.8",
+    "@aws-sdk/client-eventbridge": "^3.500.0"
   },
   "devDependencies": {
     "@aws-sdk/client-dynamodb": "^3.500.0",
