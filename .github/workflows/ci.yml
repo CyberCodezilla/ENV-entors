@@ -48,7 +48,7 @@ jobs:
       - name: Run Python ML Tests
         run: |
           export PYTHONPATH=ml
-          pytest ml/tests
+          python -m pytest ml/tests
 
       - name: Build Frontend (validation)
         run: npm run build --workspace=apps/web
@@ -105,3 +105,4 @@ jobs:
           if [ "$DIST_ID" != "None" ] && [ -n "$DIST_ID" ]; then
             aws cloudfront create-invalidation --distribution-id $DIST_ID --paths "/*"
           fi
+
