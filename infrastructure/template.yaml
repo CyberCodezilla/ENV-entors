@@ -38,14 +38,6 @@ Parameters:
     Type: String
     Default: 'heatflood-xgb-v2'
     Description: Name of the active AWS SageMaker inference endpoint
-  EnableCloudFront:
-    Type: String
-    Default: 'false'
-    AllowedValues: ['true', 'false']
-    Description: Enable CloudFront CDN distribution (requires verified AWS account)
-
-Conditions:
-  CloudFrontEnabled: !Equals [!Ref EnableCloudFront, 'true']
 
 Resources:
 
@@ -93,22 +85,6 @@ Resources:
           AttributeType: S
       KeySchema:
         - AttributeName: hotspotId
-          KeyType: HASH
-
-  RateLimitTable:
-    Type: AWS::DynamoDB::Table
-    DeletionPolicy: Retain
-    Properties:
-      TableName: !Sub 'heatflood-ratelimit-${Stage}'
-      BillingMode: PAY_PER_REQUEST
-      TimeToLiveSpecification:
-        AttributeName: ttlEpoch
-        Enabled: true
-      AttributeDefinitions:
-        - AttributeName: key
-          AttributeType: S
-      KeySchema:
-        - AttributeName: key
           KeyType: HASH
 
   ScenarioRunsTable:
@@ -174,6 +150,35 @@ Resources:
       GroupName: Moderators
       Description: Administrative group for incident moderation and verification
       UserPoolId: !Ref UserPool
+
+  # ------------------------------------------------------------------ #
+  # AWS WAF Rate-Limiting Protection
+  # ------------------------------------------------------------------ #
+
+  ApiWebACL:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name: !Sub 'heatflood-webacl-${Stage}'
+      Scope: REGIONAL
+      DefaultAction:
+        Allow: {}
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName: HeatFloodWebACL
+      Rules:
+        - Name: IPBasedRateLimitRule
+          Priority: 1
+          Action:
+            Block: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: IPBasedRateLimitRule
+          Statement:
+            RateBasedStatement:
+              Limit: 300
+              AggregateKeyType: IP
 
   # ------------------------------------------------------------------ #
   # Secrets Manager & Dynamic References
@@ -414,29 +419,27 @@ Resources:
       StateMachineName: !Sub 'heatflood-scenario-workflow-${Stage}'
       StateMachineType: STANDARD
       RoleArn: !GetAtt ScenarioWorkflowRole.Arn
-      DefinitionString: !Sub
-        - |
-          {
-            "Comment": "Idempotent post-assessment scenario audit workflow",
-            "StartAt": "ValidateScenarioEvent",
-            "States": {
-              "ValidateScenarioEvent": {
-                "Type": "Choice",
-                "Choices": [{ "Variable": "$.detail.simulated", "BooleanEquals": true, "Next": "RecordWorkflowCompletion" }],
-                "Default": "RejectNonSimulation"
-              },
-              "RecordWorkflowCompletion": {
-                "Type": "Task",
-                "Resource": "arn:aws:states:::lambda:invoke",
-                "Parameters": { "FunctionName": "${TaskArn}", "Payload.$": "$.detail" },
-                "Retry": [{ "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException", "States.Timeout"], "IntervalSeconds": 2, "MaxAttempts": 3, "BackoffRate": 2.0 }],
-                "ResultPath": "$.workflowResult",
-                "End": true
-              },
-              "RejectNonSimulation": { "Type": "Fail", "Error": "NonSimulationEvent", "Cause": "Only explicitly simulated scenarios may enter this workflow." }
-            }
+      DefinitionString: !Sub |
+        {
+          "Comment": "Idempotent post-assessment scenario audit workflow",
+          "StartAt": "ValidateScenarioEvent",
+          "States": {
+            "ValidateScenarioEvent": {
+              "Type": "Choice",
+              "Choices": [{ "Variable": "$.detail.simulated", "BooleanEquals": true, "Next": "RecordWorkflowCompletion" }],
+              "Default": "RejectNonSimulation"
+            },
+            "RecordWorkflowCompletion": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": { "FunctionName": "${ScenarioWorkflowTaskFunction.Arn}", "Payload.$": "$.detail" },
+              "Retry": [{ "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException", "States.Timeout"], "IntervalSeconds": 2, "MaxAttempts": 3, "BackoffRate": 2.0 }],
+              "ResultPath": "$.workflowResult",
+              "End": true
+            },
+            "RejectNonSimulation": { "Type": "Fail", "Error": "NonSimulationEvent", "Cause": "Only explicitly simulated scenarios may enter this workflow." }
           }
-        - TaskArn: !GetAtt ScenarioWorkflowTaskFunction.Arn
+        }
 
   ScenarioEventsToWorkflowRole:
     Type: AWS::IAM::Role
@@ -542,6 +545,10 @@ Resources:
                 - !Ref UserPoolClient
 
   # ------------------------------------------------------------------ #
+  # AWS WAF Association
+  # ------------------------------------------------------------------ #
+
+  # ------------------------------------------------------------------ #
   # CloudFront CDN Distribution with HTTPS for S3 Website
   # ------------------------------------------------------------------ #
 
@@ -549,18 +556,14 @@ Resources:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Sub 'heatflood-frontend-${AWS::AccountId}'
-      WebsiteConfiguration:
-        IndexDocument: index.html
-        ErrorDocument: index.html
       PublicAccessBlockConfiguration:
-        BlockPublicAcls: !If [CloudFrontEnabled, true, false]
-        BlockPublicPolicy: !If [CloudFrontEnabled, true, false]
-        IgnorePublicAcls: !If [CloudFrontEnabled, true, false]
-        RestrictPublicBuckets: !If [CloudFrontEnabled, true, false]
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
 
   CloudFrontOAC:
     Type: AWS::CloudFront::OriginAccessControl
-    Condition: CloudFrontEnabled
     Properties:
       OriginAccessControlConfig:
         Name: !Sub 'heatflood-oac-${Stage}'
@@ -575,21 +578,16 @@ Resources:
       PolicyDocument:
         Statement:
           - Effect: Allow
-            Principal: !If
-              - CloudFrontEnabled
-              - Service: cloudfront.amazonaws.com
-              - '*'
+            Principal:
+              Service: cloudfront.amazonaws.com
             Action: s3:GetObject
             Resource: !Sub '${FrontendBucket.Arn}/*'
-            Condition: !If
-              - CloudFrontEnabled
-              - StringEquals:
-                  AWS:SourceArn: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${FrontendDistribution}'
-              - !Ref AWS::NoValue
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${FrontendDistribution}'
 
   FrontendDistribution:
     Type: AWS::CloudFront::Distribution
-    Condition: CloudFrontEnabled
     Properties:
       DistributionConfig:
         Enabled: true
@@ -650,17 +648,30 @@ Resources:
       Threshold: 2500
       ComparisonOperator: GreaterThanThreshold
 
+  WAFBlockedRequestsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Alarm if WAF rate-limiting rule blocks malicious flood traffic
+      Namespace: AWS/WAFV2
+      MetricName: BlockedRequests
+      Dimensions:
+        - Name: Rule
+          Value: IPBasedRateLimitRule
+        - Name: WebACL
+          Value: !Sub 'heatflood-webacl-${Stage}'
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 10
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+
 Outputs:
   ApiUrl:
     Description: API Gateway base URL
     Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}'
   FrontendDistributionDomainName:
-    Condition: CloudFrontEnabled
     Description: CloudFront CDN Domain Name with HTTPS for Frontend S3 Bucket
     Value: !GetAtt FrontendDistribution.DomainName
-  FrontendWebsiteUrl:
-    Description: Frontend S3 Website URL
-    Value: !GetAtt FrontendBucket.WebsiteURL
   FrontendBucketName:
     Value: !Ref FrontendBucket
   IncidentsTableName:
@@ -673,4 +684,6 @@ Outputs:
     Value: !Ref UserPool
   UserPoolClientId:
     Value: !Ref UserPoolClient
+  WebACLArn:
+    Value: !GetAtt ApiWebACL.Arn
 
