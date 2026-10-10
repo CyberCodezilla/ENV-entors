@@ -34,10 +34,14 @@ Parameters:
     Default: 'true'
     AllowedValues: ['true', 'false']
     Description: Enable or disable AWS SageMaker ML inference endpoint integration
-  SageMakerEndpointName:
+  EnableCloudFront:
     Type: String
-    Default: 'heatflood-xgb-v2'
-    Description: Name of the active AWS SageMaker inference endpoint
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Enable optional AWS CloudFront CDN distribution (requires verified AWS account)
+
+Conditions:
+  CreateCloudFront: !Equals [!Ref EnableCloudFront, 'true']
 
 Resources:
 
@@ -416,20 +420,14 @@ Resources:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Sub 'heatflood-frontend-${AWS::AccountId}'
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: index.html
       PublicAccessBlockConfiguration:
-        BlockPublicAcls: true
-        BlockPublicPolicy: true
-        IgnorePublicAcls: true
-        RestrictPublicBuckets: true
-
-  CloudFrontOAC:
-    Type: AWS::CloudFront::OriginAccessControl
-    Properties:
-      OriginAccessControlConfig:
-        Name: !Sub 'heatflood-oac-${Stage}'
-        OriginAccessControlOriginType: s3
-        SigningBehavior: always
-        SigningProtocol: sigv4
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
 
   FrontendBucketPolicy:
     Type: AWS::S3::BucketPolicy
@@ -438,16 +436,23 @@ Resources:
       PolicyDocument:
         Statement:
           - Effect: Allow
-            Principal:
-              Service: cloudfront.amazonaws.com
+            Principal: '*'
             Action: s3:GetObject
             Resource: !Sub '${FrontendBucket.Arn}/*'
-            Condition:
-              StringEquals:
-                AWS:SourceArn: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${FrontendDistribution}'
+
+  CloudFrontOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Condition: CreateCloudFront
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub 'heatflood-oac-${Stage}'
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
 
   FrontendDistribution:
     Type: AWS::CloudFront::Distribution
+    Condition: CreateCloudFront
     Properties:
       DistributionConfig:
         Enabled: true
@@ -529,7 +534,11 @@ Outputs:
   ApiUrl:
     Description: API Gateway base URL
     Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}'
+  FrontendWebsiteUrl:
+    Description: Direct S3 Static Website Hosting URL
+    Value: !Sub 'http://${FrontendBucket}.s3-website.${AWS::Region}.amazonaws.com'
   FrontendDistributionDomainName:
+    Condition: CreateCloudFront
     Description: CloudFront CDN Domain Name with HTTPS for Frontend S3 Bucket
     Value: !GetAtt FrontendDistribution.DomainName
   FrontendBucketName:
