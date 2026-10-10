@@ -412,6 +412,7 @@ Resources:
 
   ApiWebACLAssociation:
     Type: AWS::WAFv2::WebACLAssociation
+    DependsOn: ApiWebACL
     Properties:
       ResourceArn: !Sub 'arn:aws:apigateway:${AWS::Region}::/apis/${HttpApi}/stages/${Stage}'
       WebACLArn: !GetAtt ApiWebACL.Arn
