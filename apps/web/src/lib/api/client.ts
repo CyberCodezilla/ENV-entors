@@ -1,4 +1,4 @@
-﻿import type {
+import type {
   AnalyseResponse,
   AnalyseRoutesRequest,
   CreateIncidentRequest,
@@ -12,6 +12,7 @@
 } from './types';
 import type { AppError } from './errors';
 import { clampBbox, type Bbox } from '../geo/bbox';
+import { enqueueOfflineIncident } from '../offlineQueue';
 
 const DEFAULT_BASE = 'https://jpiub1heok.execute-api.ap-south-1.amazonaws.com/prod';
 const BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || DEFAULT_BASE).replace(/\/+$/, '');
@@ -106,12 +107,21 @@ export const api = {
     );
   },
 
-  createIncident: (req: CreateIncidentRequest, signal?: AbortSignal) =>
-    apiFetch<CreateIncidentResponse>('/incidents', {
+  createIncident: (req: CreateIncidentRequest, signal?: AbortSignal) => {
+    if (typeof window !== 'undefined' && typeof navigator !== 'undefined' && !navigator.onLine) {
+      enqueueOfflineIncident(req as any);
+      return Promise.resolve({
+        incidentId: req.idempotencyKey,
+        status: 'queued_offline',
+        expiresAt: new Date(Date.now() + 3600000).toISOString(),
+      } as CreateIncidentResponse);
+    }
+    return apiFetch<CreateIncidentResponse>('/incidents', {
       method: 'POST',
       body: JSON.stringify(req),
       signal,
-    }),
+    });
+  },
 
   getStatus: (lat: number, lon: number, signal?: AbortSignal) =>
     apiFetch<StatusResponse>(

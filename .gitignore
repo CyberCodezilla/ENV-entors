@@ -56,6 +56,15 @@ ml/.venv/
 ml/data/model/
 ml/data/mumbai_weather.csv
 
-# Generated build files
+# Generated build files & Cache
 apps/web/src/app/tailwind-built.css
+.turbo/
+.cache/
+.vitest/
+.next/
+dist/
+tmp/
+scratch/
+*.tmp
+*.cache
 
