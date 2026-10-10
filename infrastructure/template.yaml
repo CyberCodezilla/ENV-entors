@@ -225,8 +225,6 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /routes/analyse
             Method: POST
-            Auth:
-              Authorizer: NONE
 
   GetStatusFunction:
     Type: AWS::Serverless::Function
@@ -246,8 +244,6 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /status
             Method: GET
-            Auth:
-              Authorizer: NONE
 
   IncidentReportsDLQ:
     Type: AWS::SQS::Queue
@@ -285,8 +281,6 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /incidents
             Method: POST
-            Auth:
-              Authorizer: NONE
 
   IncidentWorkerFunction:
     Type: AWS::Serverless::Function
@@ -322,8 +316,6 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /incidents
             Method: GET
-            Auth:
-              Authorizer: NONE
 
   HealthFunction:
     Type: AWS::Serverless::Function
@@ -342,8 +334,6 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /health
             Method: GET
-            Auth:
-              Authorizer: NONE
 
   GetDemoScenarioFunction:
     Type: AWS::Serverless::Function
@@ -358,8 +348,6 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /demo/scenarios/{id}
             Method: GET
-            Auth:
-              Authorizer: NONE
 
   InnovationScenarioFunction:
     Type: AWS::Serverless::Function
@@ -386,16 +374,12 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /scenarios/run
             Method: POST
-            Auth:
-              Authorizer: NONE
         ScenarioHistory:
           Type: HttpApi
           Properties:
             ApiId: !Ref HttpApi
             Path: /scenarios/history
             Method: GET
-            Auth:
-              Authorizer: NONE
 
   ScenarioWorkflowTaskFunction:
     Type: AWS::Serverless::Function
