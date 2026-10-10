@@ -1,12 +1,12 @@
-'use client';
+﻿'use client';
 
 import React, { useMemo, useState } from 'react';
 type GlyphProps = { size?: number; style?: React.CSSProperties };
 const glyph = (mark: string) => function Glyph({ size = 16, style }: GlyphProps) { return <span aria-hidden="true" style={{ display: 'inline-block', width: size, fontSize: size, lineHeight: 1, textAlign: 'center', ...style }}>{mark}</span>; };
-const Activity = glyph('◉'); const AlertTriangle = glyph('△'); const ArrowDownRight = glyph('↘'); const ArrowUpRight = glyph('↗');
-const CheckCircle2 = glyph('✓'); const Clock3 = glyph('◷'); const CloudRain = glyph('☂'); const Flame = glyph('♨');
-const GitBranch = glyph('⑂'); const MapPin = glyph('⌖'); const ShieldCheck = glyph('⬡'); const Siren = glyph('!');
-const WifiOff = glyph('×'); const Zap = glyph('⚡');
+const Activity = glyph('â—‰'); const AlertTriangle = glyph('â–³'); const ArrowDownRight = glyph('â†˜'); const ArrowUpRight = glyph('â†—');
+const CheckCircle2 = glyph('âœ“'); const Clock3 = glyph('â—·'); const CloudRain = glyph('â˜‚'); const Flame = glyph('â™¨');
+const GitBranch = glyph('â‘‚'); const MapPin = glyph('âŒ–'); const ShieldCheck = glyph('â¬¡'); const Siren = glyph('!');
+const WifiOff = glyph('Ã—'); const Zap = glyph('âš¡');
 
 type ScenarioId = 'cloudburst' | 'heat' | 'blocked-road' | 'compound';
 type Scenario = { id: ScenarioId; title: string; description: string; rainfallMm: number; apparentTempC: number; blockedRoads: number; unavailableShelters: number; exposedPeople: number; };
@@ -25,7 +25,7 @@ function assess(s: Scenario, failMl: boolean) {
   const level = combined >= 75 ? 'CRITICAL' : combined >= 55 ? 'HIGH' : combined >= 30 ? 'MODERATE' : 'LOW';
   const actions = [
     { title: 'Verify blocked segments and refresh route status', reason: `${s.blockedRoads} blocked-road assumption(s) are included; verification prevents stale routes from being treated as available.`, priority: 1 },
-    { title: s.apparentTempC >= 36 ? 'Prioritize exposed people and cooling access' : 'Prioritize low-lying areas and drainage access', reason: s.apparentTempC >= 36 ? `Apparent temperature is ${s.apparentTempC}°C in this simulation.` : `Rainfall input is ${s.rainfallMm} mm in this simulation.`, priority: 2 },
+    { title: s.apparentTempC >= 36 ? 'Prioritize exposed people and cooling access' : 'Prioritize low-lying areas and drainage access', reason: s.apparentTempC >= 36 ? `Apparent temperature is ${s.apparentTempC}Â°C in this simulation.` : `Rainfall input is ${s.rainfallMm} mm in this simulation.`, priority: 2 },
     { title: 'Request human review before issuing public guidance', reason: 'Scenario inputs are simulated and do not confirm real road or shelter status.', priority: 3 },
   ];
   return { flood, heat, combined, level, actions, degraded: failMl, engine: failMl ? 'Deterministic rules (ML unavailable)' : 'Deterministic rules + optional ML advisory slot' };
@@ -45,7 +45,9 @@ export default function CommandCenterPage() {
   const [notice, setNotice] = useState('');
   const scenario = scenarios.find(s => s.id === selected) ?? scenarios[0];
   const before = useMemo(() => assess({ ...scenario, rainfallMm: Math.max(0, scenario.rainfallMm * 0.35), apparentTempC: Math.max(22, scenario.apparentTempC - 5), blockedRoads: 0, unavailableShelters: 0 }, false), [scenario]);
-  const after = useMemo(() => {
+  type Action = { priority: number; title: string; reason: string };
+  type Assessment = { flood: number; heat: number; combined: number; level: string; actions: Action[]; degraded: boolean; engine: string };
+  const after = useMemo<Assessment>(() => {
     if (serverResult?.indices) return { flood: serverResult.indices.flood, heat: serverResult.indices.heat, combined: serverResult.indices.composite, level: serverResult.indices.level, actions: (serverResult.recommendations ?? []).map((a: any) => ({ priority: a.priority, title: a.action, reason: a.rationale })), degraded: !!serverResult.degraded, engine: serverResult.engine };
     return assess(scenario, failureMode);
   }, [scenario, failureMode, serverResult]);
@@ -107,9 +109,9 @@ export default function CommandCenterPage() {
         <header className="cc-top">
           <div className="cc-brand">
             <div className="cc-logo"><ShieldCheck size={25}/></div>
-            <div><div className="cc-eyebrow">ENV-entors · Innovation Lab</div><h1 className="cc-title">Disaster Response Command Center</h1><div className="cc-sub">Explore how a hazard changes exposure and response priorities. This additive module does not replace the existing HeatFlood Guardian map or route analysis.</div></div>
+            <div><div className="cc-eyebrow">ENV-entors Â· Innovation Lab</div><h1 className="cc-title">Disaster Response Command Center</h1><div className="cc-sub">Explore how a hazard changes exposure and response priorities. This additive module does not replace the existing HeatFlood Guardian map or route analysis.</div></div>
           </div>
-          <div className="cc-pill"><Activity size={15}/> SIMULATION MODE · NOT LIVE GUIDANCE · API {backendState.toUpperCase()}</div>
+          <div className="cc-pill"><Activity size={15}/> SIMULATION MODE Â· NOT LIVE GUIDANCE Â· API {backendState.toUpperCase()}</div>
         </header>
 
         <div className="cc-grid">
@@ -118,7 +120,7 @@ export default function CommandCenterPage() {
             <div className="cc-select">
               {scenarios.map(s => <button key={s.id} className="cc-option" aria-pressed={selected===s.id} onClick={()=>{setSelected(s.id);setNotice('');setServerResult(null)}}><strong>{s.title}</strong><span>{s.description}</span></button>)}
             </div>
-            <button className="cc-btn" onClick={runScenario} disabled={running} aria-busy={running}><Zap size={15} style={{display:'inline',verticalAlign:'-3px',marginRight:6}}/>{running ? 'Assessing…' : 'Run scenario assessment'}</button>
+            <button className="cc-btn" onClick={runScenario} disabled={running} aria-busy={running}><Zap size={15} style={{display:'inline',verticalAlign:'-3px',marginRight:6}}/>{running ? 'Assessingâ€¦' : 'Run scenario assessment'}</button>
             <button className="cc-secondary" onClick={()=>{setFailureMode(v=>!v);setServerResult(null)}}>{failureMode ? 'Disable failure injection' : 'Simulate ML advisory outage'}</button>
             {failureMode && <div className="cc-alert"><WifiOff size={16}/>ML advisory is marked unavailable. The deterministic scenario engine continues and flags the degraded mode.</div>}
             {notice && <div className="cc-alert" role="status"><CheckCircle2 size={16}/>{notice}</div>}
@@ -133,7 +135,7 @@ export default function CommandCenterPage() {
 
             <div className="cc-main-grid" style={{marginTop:16}}>
               <Metric label="Flood index" value={`${after.flood}/100`} hint={`${scenario.rainfallMm} mm/h scenario input`}/>
-              <Metric label="Heat index" value={`${after.heat}/100`} hint={`${scenario.apparentTempC}°C apparent-temp input`}/>
+              <Metric label="Heat index" value={`${after.heat}/100`} hint={`${scenario.apparentTempC}Â°C apparent-temp input`}/>
               <Metric label="Exposed people" value={scenario.exposedPeople.toLocaleString()} hint="Synthetic planning estimate"/>
               <Metric label="Blocked roads" value={`${scenario.blockedRoads}`} hint="Assumed for this scenario"/>
             </div>
@@ -161,11 +163,12 @@ export default function CommandCenterPage() {
 
         <section className="cc-card" style={{marginTop:16}}>
           <h2><Clock3 size={16} style={{display:'inline',verticalAlign:'-3px',marginRight:7}}/>Session audit history</h2>
-          {history.length===0 ? <div className="cc-muted">No recorded scenarios found. Run a scenario to create a record when the backend is available.</div> : <div className="cc-list">{history.map(h=><div className="cc-action" key={h.id}><div className="cc-num"><Clock3 size={14}/></div><div><strong style={{fontSize:13}}>{h.title}</strong><div className="cc-muted">{h.time} · {h.level} · {h.id}</div></div></div>)}</div>}
+          {history.length===0 ? <div className="cc-muted">No recorded scenarios found. Run a scenario to create a record when the backend is available.</div> : <div className="cc-list">{history.map(h=><div className="cc-action" key={h.id}><div className="cc-num"><Clock3 size={14}/></div><div><strong style={{fontSize:13}}>{h.title}</strong><div className="cc-muted">{h.time} Â· {h.level} Â· {h.id}</div></div></div>)}</div>}
           <div className="cc-footer">Only entries marked persisted were saved to DynamoDB. Local fallback entries exist in browser memory only and are not durable audit records.</div>
         </section>
-        <div className="cc-footer" style={{textAlign:'center'}}>ENV-entors Innovation Add-on · Existing route analysis and replay theater remain unchanged.</div>
+        <div className="cc-footer" style={{textAlign:'center'}}>ENV-entors Innovation Add-on Â· Existing route analysis and replay theater remain unchanged.</div>
       </div>
     </main>
   );
 }
+
