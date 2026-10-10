@@ -38,6 +38,20 @@ export function getGeohashNeighbors5(lat: number, lon: number): string[] {
   return Array.from(hashes);
 }
 
+export function getGeohashNeighbors6(lat: number, lon: number): string[] {
+  const dLat = 0.01;
+  const dLon = 0.01;
+  const hashes = new Set<string>();
+  for (const latOffset of [-dLat, 0, dLat]) {
+    for (const lonOffset of [-dLon, 0, dLon]) {
+      const targetLat = Math.max(-90, Math.min(90, lat + latOffset));
+      const targetLon = Math.max(-180, Math.min(180, lon + lonOffset));
+      hashes.add(encodeGeohash(targetLat, targetLon, 6));
+    }
+  }
+  return Array.from(hashes);
+}
+
 
 
 /**

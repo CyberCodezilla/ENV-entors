@@ -34,17 +34,20 @@ export function getGeohashesForBbox(
   latMax: number,
   maxGeohashes: number = MAX_GEOHASHES
 ): string[] {
-  const step = 0.03; // precision 5 cell width/height step (~4.9 km x 4.9 km)
+  // Precision 5 geohash grid dimensions at ~19°N latitude: ~0.044° lon x ~0.044° lat.
+  // Step by 0.04° to sample each cell deterministically without redundant sub-stepping (O(1)).
+  const step = 0.04;
   const set = new Set<string>();
-  for (let lat = latMin; ; lat = Math.min(latMax, lat + step)) {
-    for (let lon = lngMin; ; lon = Math.min(lngMax, lon + step)) {
-      set.add(encodeGeohash(lat, lon, 5));
-      if (set.size >= maxGeohashes) break;
-      if (lon >= lngMax) break;
+
+  for (let lat = latMin; lat <= latMax + step / 2; lat += step) {
+    const sampleLat = Math.min(latMax, lat);
+    for (let lon = lngMin; lon <= lngMax + step / 2; lon += step) {
+      const sampleLon = Math.min(lngMax, lon);
+      set.add(encodeGeohash(sampleLat, sampleLon, 5));
+      if (set.size >= maxGeohashes) return Array.from(set);
     }
-    if (set.size >= maxGeohashes) break;
-    if (lat >= latMax) break;
   }
+
   return Array.from(set).slice(0, maxGeohashes);
 }
 

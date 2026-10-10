@@ -29,7 +29,7 @@ import {
 } from '@heatflood/shared';
 import { fetchMapboxRoutes } from '../adapters/mapbox';
 import { fetchWeather, WeatherSnapshot } from '../adapters/openMeteo';
-import { fetchIncidentsForPoints } from '../adapters/dynamodb';
+import { fetchIncidentsForPoints, getGeohashNeighbors6 } from '../adapters/dynamodb';
 import { SageMakerMlRiskProvider } from '../adapters/sagemaker';
 import { getHotspots } from '../utils/hotspotCache';
 import { scoreSegment } from '../engine/segmentScorer';
@@ -207,19 +207,70 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
           }
         }
 
+        // Spatial pre-bucketing by geohash-6 (O(I + H)) to eliminate O(S * (I + H)) trigonometric distance checks
+        const incidentSpatialMap = new Map<string, ActiveIncident[]>();
+        for (const inc of incidents) {
+          const gh6 = encodeGeohash(inc.latitude, inc.longitude, 6);
+          const arr = incidentSpatialMap.get(gh6);
+          if (arr) arr.push(inc);
+          else incidentSpatialMap.set(gh6, [inc]);
+        }
+
+        const hotspotSpatialMap = new Map<string, FloodHotspot[]>();
+        for (const hs of hotspots) {
+          const gh6 = encodeGeohash(hs.lat, hs.lon, 6);
+          const arr = hotspotSpatialMap.get(gh6);
+          if (arr) arr.push(hs);
+          else hotspotSpatialMap.set(gh6, [hs]);
+        }
+
         const segmentAssessments = await Promise.all(
           segs.map(async (seg, idx) => {
-            const [sLon, sLat] = seg.startCoord;
-            const [eLon, eLat] = seg.endCoord;
+            const [sLonRaw, sLatRaw] = seg.startCoord;
+            const [eLonRaw, eLatRaw] = seg.endCoord;
+            const sLat = Number(sLatRaw.toFixed(5));
+            const sLon = Number(sLonRaw.toFixed(5));
+            const eLat = Number(eLatRaw.toFixed(5));
+            const eLon = Number(eLonRaw.toFixed(5));
             const segMidLat = (sLat + eLat) / 2;
             const segMidLon = (sLon + eLon) / 2;
 
-            const nearbyIncidents = incidents.filter(inc =>
+            const cellHashes = getGeohashNeighbors6(segMidLat, segMidLon);
+
+            const candidateIncidents: ActiveIncident[] = [];
+            const seenInc = new Set<string>();
+            for (const gh of cellHashes) {
+              const cellItems = incidentSpatialMap.get(gh);
+              if (cellItems) {
+                for (const inc of cellItems) {
+                  if (!seenInc.has(inc.incidentId)) {
+                    seenInc.add(inc.incidentId);
+                    candidateIncidents.push(inc);
+                  }
+                }
+              }
+            }
+
+            const candidateHotspots: FloodHotspot[] = [];
+            const seenHs = new Set<string>();
+            for (const gh of cellHashes) {
+              const cellItems = hotspotSpatialMap.get(gh);
+              if (cellItems) {
+                for (const hs of cellItems) {
+                  if (!seenHs.has(hs.hotspotId)) {
+                    seenHs.add(hs.hotspotId);
+                    candidateHotspots.push(hs);
+                  }
+                }
+              }
+            }
+
+            const nearbyIncidents = candidateIncidents.filter(inc =>
               haversineDistanceM(segMidLat, segMidLon, inc.latitude, inc.longitude)
               <= SEGMENT_PARAMS.hazardMatchRadiusM
             );
 
-            const nearbyHotspots = hotspots.filter(hs =>
+            const nearbyHotspots = candidateHotspots.filter(hs =>
               haversineDistanceM(segMidLat, segMidLon, hs.lat, hs.lon)
               <= SEGMENT_PARAMS.hotspotMatchRadiusM
             );
@@ -246,11 +297,19 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
           }),
         );
 
+        // Compact route line geometry coordinates to 5 decimal places for transport optimization
+        const compactGeometry = {
+          type: route.geometry.type,
+          coordinates: route.geometry.coordinates.map(
+            ([lon, lat]) => [Number(lon.toFixed(5)), Number(lat.toFixed(5))] as [number, number]
+          ),
+        };
+
         return {
           routeId: route.routeId,
           distanceM: route.distanceM,
           durationSec: route.durationSec,
-          geometry: route.geometry,
+          geometry: compactGeometry,
           segments: segmentAssessments,
         } satisfies RawRoute;
       }),

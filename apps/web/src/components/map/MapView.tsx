@@ -416,12 +416,11 @@ export default function MapView({ onBboxChange, onRequestReport }: MapViewProps)
           const glowId = `route-glow-${route.routeId}`;
           const mainId = `route-main-${route.routeId}`;
 
-          // Convert segments into GeoJSON feature collection for fine-grained per-segment styling
           const segmentFeatures: GeoJSON.Feature[] = route.segments.map((seg) => {
             let score = Math.max(seg.floodRisk, seg.heatRisk);
             if (metricLens === 'flood') score = seg.floodRisk;
             if (metricLens === 'heat') score = seg.heatRisk;
-            if (metricLens === 'confidence') score = 100 - seg.confidence; // higher is worse
+            if (metricLens === 'confidence') score = 100 - seg.confidence;
 
             const color = scoreToRiskColor(score);
 
@@ -449,15 +448,22 @@ export default function MapView({ onBboxChange, onRequestReport }: MapViewProps)
             };
           });
 
-          map.addSource(srcId, {
-            type: 'geojson',
-            lineMetrics: true,
-            data: {
-              type: 'FeatureCollection',
-              features: segmentFeatures,
-            },
-          });
-          routeSourcesRef.current.push(srcId);
+          const geojsonContent: GeoJSON.FeatureCollection = {
+            type: 'FeatureCollection',
+            features: segmentFeatures,
+          };
+
+          const existingSource = map.getSource(srcId) as mapboxgl.GeoJSONSource | undefined;
+          if (existingSource) {
+            existingSource.setData(geojsonContent);
+          } else {
+            map.addSource(srcId, {
+              type: 'geojson',
+              lineMetrics: true,
+              data: geojsonContent,
+            });
+            routeSourcesRef.current.push(srcId);
+          }
 
           // 1. Casing (width 10, dark #0A0E14)
           map.addLayer({
