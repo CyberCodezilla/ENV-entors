@@ -1,0 +1,107 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, dev ]
+  pull_request:
+    branches: [ main, dev ]
+
+jobs:
+  validate-test-deploy:
+    name: Validate, Test & Deploy
+    runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Node Dependencies
+        run: npm ci
+
+      - name: Install Python Dependencies
+        run: pip install -r ml/requirements.txt
+
+      - name: Build Lambda Code
+        run: npm run build --workspace=lambda
+
+      - name: Run TypeScript Typecheck
+        run: npm run typecheck --workspaces
+
+      - name: Run Vitest Unit Tests
+        run: npx vitest run tests/unit
+
+      - name: Run Python ML Tests
+        run: |
+          export PYTHONPATH=ml
+          pytest ml/tests
+
+      - name: Build Frontend (validation)
+        run: npm run build --workspace=apps/web
+
+      - name: Setup AWS SAM CLI
+        uses: aws-actions/setup-sam@v2
+
+      - name: Validate SAM Infrastructure Template
+        run: sam validate -t infrastructure/template.yaml
+
+      - name: Explain deployment prerequisites
+        if: github.ref == 'refs/heads/main' && (env.AWS_ACCESS_KEY_ID == '' || env.AWS_SECRET_ACCESS_KEY == '')
+        run: echo "::warning::AWS deployment was skipped because repository secret AWS_ACCESS_KEY_ID is missing. Configure AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in GitHub Actions secrets. Never commit credentials."
+
+      - name: Configure AWS Credentials
+        if: github.ref == 'refs/heads/main' && env.AWS_ACCESS_KEY_ID != '' && env.AWS_SECRET_ACCESS_KEY != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-south-1
+
+      - name: Build & Deploy SAM Backend (Prod)
+        if: github.ref == 'refs/heads/main' && env.AWS_ACCESS_KEY_ID != '' && env.AWS_SECRET_ACCESS_KEY != ''
+        run: |
+          cd infrastructure
+          sam build
+          sam deploy \
+            --stack-name heatflood-guardian \
+            --region ap-south-1 \
+            --capabilities CAPABILITY_IAM \
+            --resolve-s3 \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides Stage=prod AllowedOrigins="*"
+
+      - name: Configure production API URL for static frontend
+        if: github.ref == 'refs/heads/main' && env.AWS_ACCESS_KEY_ID != '' && env.AWS_SECRET_ACCESS_KEY != ''
+        run: |
+          API_URL=$(aws cloudformation describe-stacks --stack-name heatflood-guardian --region ap-south-1 --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue | [0]" --output text)
+          if [ -z "$API_URL" ] || [ "$API_URL" = "None" ]; then echo "Could not resolve API URL from deployed stack"; exit 1; fi
+          echo "NEXT_PUBLIC_API_BASE_URL=$API_URL" >> "$GITHUB_ENV"
+
+      - name: Build Frontend App
+        if: github.ref == 'refs/heads/main' && env.AWS_ACCESS_KEY_ID != '' && env.AWS_SECRET_ACCESS_KEY != ''
+        run: npm run build --workspace=apps/web
+
+      - name: Deploy Frontend to S3 & Invalidate CloudFront
+        if: github.ref == 'refs/heads/main' && env.AWS_ACCESS_KEY_ID != '' && env.AWS_SECRET_ACCESS_KEY != ''
+        run: |
+          DIST_ID=$(aws cloudfront list-distributions --query "DistributionList.Items[?Comment=='HeatFlood Frontend Distribution' || contains(Origins.Items[0].DomainName, 'heatflood-frontend')].Id | [0]" --output text)
+          BUCKET_NAME=$(aws cloudformation describe-stacks --stack-name heatflood-guardian --query "Stacks[0].Outputs[?OutputKey=='FrontendBucketName'].OutputValue" --output text)
+          aws s3 sync apps/web/out s3://$BUCKET_NAME --delete
+          if [ "$DIST_ID" != "None" ] && [ -n "$DIST_ID" ]; then
+            aws cloudfront create-invalidation --distribution-id $DIST_ID --paths "/*"
+          fi
