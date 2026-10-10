@@ -34,6 +34,10 @@ Parameters:
     Default: 'true'
     AllowedValues: ['true', 'false']
     Description: Enable or disable AWS SageMaker ML inference endpoint integration
+  SageMakerEndpointName:
+    Type: String
+    Default: 'heatflood-xgb-v2'
+    Description: Name of the active AWS SageMaker inference endpoint
   EnableCloudFront:
     Type: String
     Default: 'false'
