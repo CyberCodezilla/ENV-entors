@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import React from 'react';
 import { useAppStore } from '@/lib/store/useAppStore';
@@ -6,13 +6,14 @@ import { RouteCard } from './RouteCard';
 import { EmergencyAdvisory } from './EmergencyAdvisory';
 import { SegmentDrawer } from './SegmentDrawer';
 import { Skeleton } from '@/components/ui/Skeleton';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, Loader2 } from 'lucide-react';
 
 export function ResultsStack() {
   const { analysis, selectRoute, selectSegment } = useAppStore();
   const { phase, data, error, selectedRouteId, selectedSegmentIndex } = analysis;
 
-  if (phase === 'analysing') {
+  // Initial load: show skeletons only if there is NO route data yet
+  if (phase === 'analysing' && !data) {
     return (
       <div
         role="region"
@@ -45,6 +46,7 @@ export function ResultsStack() {
 
   if (!data) return null;
 
+  const isRefreshing = phase === 'analysing';
   const selectedRoute = data.routes.find((r) => r.routeId === selectedRouteId);
   const selectedSegment =
     selectedRoute && selectedSegmentIndex !== null
@@ -55,8 +57,18 @@ export function ResultsStack() {
     <div
       role="region"
       aria-live="polite"
-      className="flex flex-col gap-3 mt-2 animate-in fade-in duration-300"
+      className={`flex flex-col gap-3 mt-2 transition-opacity duration-200 ${
+        isRefreshing ? 'opacity-75' : 'opacity-100'
+      }`}
     >
+      {/* Background Re-analysis status indicator */}
+      {isRefreshing && (
+        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-raised/70 border border-line text-[11px] font-mono text-flood animate-pulse">
+          <Loader2 className="w-3 h-3 animate-spin text-flood shrink-0" />
+          <span>Updating route hazard forecast...</span>
+        </div>
+      )}
+
       {/* Segment Evidence Drawer (pops up when segment is clicked) */}
       {selectedSegment && (
         <SegmentDrawer

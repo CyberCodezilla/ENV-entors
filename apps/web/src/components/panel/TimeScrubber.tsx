@@ -2,30 +2,36 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useAppStore } from '@/lib/store/useAppStore';
-import { Clock, Sun } from 'lucide-react';
+import { Clock, Sun, Loader2 } from 'lucide-react';
 
 export function TimeScrubber() {
-  const { analysis, departureTime, setDepartureTime, analyse } = useAppStore();
+  const { analysis, setDepartureTime, analyse } = useAppStore();
   const [offsetMinutes, setOffsetMinutes] = useState(0); // 0 to 720 (12 hours)
   const baseTimeRef = useRef(new Date());
+  const prevOffsetRef = useRef(0);
 
-  // Debounce re-analysis on slider change (600ms per M7 spec)
-  // MUST be called before any conditional return to satisfy React Rules of Hooks
+  // Debounce re-analysis strictly when offsetMinutes changes
+  // Guarded with prevOffsetRef to completely prevent recursive re-analysis loops
   useEffect(() => {
-    if (analysis.phase !== 'success' || !analysis.data || offsetMinutes === 0) return;
+    if (offsetMinutes === prevOffsetRef.current) return;
+    prevOffsetRef.current = offsetMinutes;
+
+    if (!analysis.data) return;
 
     const currentDeparture = new Date(baseTimeRef.current.getTime() + offsetMinutes * 60_000);
+    setDepartureTime(currentDeparture.toISOString());
+
     const timer = setTimeout(() => {
-      setDepartureTime(currentDeparture.toISOString());
       analyse();
     }, 600);
 
     return () => clearTimeout(timer);
-  }, [offsetMinutes, analysis.phase, analysis.data, analyse, setDepartureTime]);
+  }, [offsetMinutes, analysis.data, setDepartureTime, analyse]);
 
-  // Only render when route analysis is available
-  if (analysis.phase !== 'success' || !analysis.data) return null;
+  // Keep mounted as long as analysis data exists (never unmount during background re-analysis)
+  if (!analysis.data) return null;
 
+  const isUpdating = analysis.phase === 'analysing';
   const currentDeparture = new Date(baseTimeRef.current.getTime() + offsetMinutes * 60_000);
   const formattedIST = currentDeparture.toLocaleTimeString('en-IN', {
     timeZone: 'Asia/Kolkata',
@@ -56,6 +62,9 @@ export function TimeScrubber() {
         <div className="flex items-center gap-1.5 text-ink font-semibold">
           <Clock className="w-3.5 h-3.5 text-flood" />
           <span>Departing {formattedIST} IST</span>
+          {isUpdating && (
+            <Loader2 className="w-3 h-3 text-flood animate-spin ml-1" />
+          )}
         </div>
 
         <div className="flex items-center gap-1.5 text-[11px]">

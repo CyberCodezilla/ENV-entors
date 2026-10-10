@@ -4,12 +4,21 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { useAppStore } from '@/lib/store/useAppStore';
-import { PILOT_ZONE_GEOJSON, PILOT_ZONE_LAYERS } from './layers';
+import { PILOT_ZONE_GEOJSON, PILOT_ZONE_LAYERS, CARTO_DARK_STYLE } from './layers';
 import { SegmentTooltip } from './SegmentTooltip';
 import type { Place, Segment, Route } from '@/lib/api/types';
 import { scoreToRiskColor } from '@/lib/theme/risk';
 
-mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? '';
+const rawToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN?.trim() ?? '';
+const hasValidToken =
+  rawToken.startsWith('pk.') &&
+  !rawToken.includes('YOUR_') &&
+  !rawToken.includes('<') &&
+  rawToken.length > 30;
+
+if (hasValidToken) {
+  mapboxgl.accessToken = rawToken;
+}
 
 const INITIAL_CENTER: [number, number] = [72.845, 19.1225];
 const INITIAL_ZOOM = 13.5;
@@ -33,6 +42,14 @@ export default function MapView({ onBboxChange, onRequestReport }: MapViewProps)
   const routeLayersRef = useRef<string[]>([]);
   const routeSourcesRef = useRef<string[]>([]);
   const incidents = useAppStore((state) => state.viewportIncidents.items);
+
+  const onBboxChangeRef = useRef(onBboxChange);
+  onBboxChangeRef.current = onBboxChange;
+
+  const onRequestReportRef = useRef(onRequestReport);
+  onRequestReportRef.current = onRequestReport;
+
+  const lastFittedRouteIdRef = useRef<string | null>(null);
 
   const [mapLoaded, setMapLoaded] = useState(false);
   const [hoveredSegment, setHoveredSegment] = useState<{
@@ -114,13 +131,15 @@ export default function MapView({ onBboxChange, onRequestReport }: MapViewProps)
     return el;
   }, []);
 
-  // Initialize Mapbox instance
+  // Initialize Mapbox instance ONCE on mount (empty deps so map NEVER reloads on clicks or parent re-renders)
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
+    const initialStyle = hasValidToken ? 'mapbox://styles/mapbox/dark-v11' : CARTO_DARK_STYLE;
+
     const map = new mapboxgl.Map({
       container: containerRef.current,
-      style: 'mapbox://styles/mapbox/dark-v11',
+      style: initialStyle,
       center: INITIAL_CENTER,
       zoom: INITIAL_ZOOM,
       maxBounds: MAX_BOUNDS,
@@ -136,20 +155,47 @@ export default function MapView({ onBboxChange, onRequestReport }: MapViewProps)
       'top-right'
     );
 
-    map.on('load', () => {
-      // Add Pilot Zone Source & Layers
-      map.addSource('pilot-zone-source', {
-        type: 'geojson',
-        data: PILOT_ZONE_GEOJSON,
-      });
-
-      map.addLayer(PILOT_ZONE_LAYERS.fill);
-      map.addLayer(PILOT_ZONE_LAYERS.line);
-
-      setMapLoaded(true);
+    // Automatic fallback if Mapbox style returns 401/403 Forbidden
+    map.on('error', (e) => {
+      const msg = e.error?.message ?? '';
+      if (
+        msg.includes('403') ||
+        msg.includes('401') ||
+        msg.includes('Forbidden') ||
+        msg.includes('Unauthorized') ||
+        (e.error as any)?.status === 403
+      ) {
+        console.warn('[MapView] Mapbox style unauthorized (403). Falling back to Carto Dark Matter.');
+        try {
+          map.setStyle(CARTO_DARK_STYLE);
+        } catch {
+          /* ignore */
+        }
+      }
     });
 
-    // Handle map clicks
+    const setupBaseLayers = () => {
+      if (!map.getSource('pilot-zone-source')) {
+        map.addSource('pilot-zone-source', {
+          type: 'geojson',
+          data: PILOT_ZONE_GEOJSON,
+        });
+      }
+
+      if (!map.getLayer(PILOT_ZONE_LAYERS.fill.id)) {
+        map.addLayer(PILOT_ZONE_LAYERS.fill);
+      }
+      if (!map.getLayer(PILOT_ZONE_LAYERS.line.id)) {
+        map.addLayer(PILOT_ZONE_LAYERS.line);
+      }
+
+      setMapLoaded(true);
+    };
+
+    map.on('load', setupBaseLayers);
+    map.on('style.load', setupBaseLayers);
+
+    // Handle map clicks without triggering map teardown or reloads
     map.on('click', (e) => {
       const {
         mapPickingTarget: currentTarget,
@@ -183,7 +229,24 @@ export default function MapView({ onBboxChange, onRequestReport }: MapViewProps)
         return;
       }
 
-      onRequestReport?.(clickedLat, clickedLon);
+      // Check if user clicked on or near a route line or interactive element
+      try {
+        const bbox: [mapboxgl.PointLike, mapboxgl.PointLike] = [
+          [e.point.x - 6, e.point.y - 6],
+          [e.point.x + 6, e.point.y + 6],
+        ];
+        const routeFeatures = map.queryRenderedFeatures(bbox).filter((f) =>
+          f.layer?.id?.startsWith('route-') || f.layer?.id?.startsWith('seg-hover-')
+        );
+        if (routeFeatures.length > 0) {
+          // User clicked a route feature, not open map terrain
+          return;
+        }
+      } catch {
+        /* ignore feature query error */
+      }
+
+      onRequestReportRef.current?.(clickedLat, clickedLon);
     });
 
     // Viewport bounding box tracking (debounced 300ms)
@@ -193,7 +256,7 @@ export default function MapView({ onBboxChange, onRequestReport }: MapViewProps)
       moveTimeout = setTimeout(() => {
         const b = map.getBounds();
         if (b) {
-          onBboxChange?.([b.getWest(), b.getSouth(), b.getEast(), b.getNorth()]);
+          onBboxChangeRef.current?.([b.getWest(), b.getSouth(), b.getEast(), b.getNorth()]);
         }
       }, 300);
     };
@@ -208,7 +271,7 @@ export default function MapView({ onBboxChange, onRequestReport }: MapViewProps)
       map.remove();
       mapRef.current = null;
     };
-  }, [onBboxChange, onRequestReport]);
+  }, []);
 
   // Handle map crosshair cursor when picking on map
   useEffect(() => {
@@ -507,28 +570,31 @@ export default function MapView({ onBboxChange, onRequestReport }: MapViewProps)
           }
         });
 
-        // Camera fitBounds to selected route
-        const selectedRoute = routes.find((r) => r.routeId === selectedRouteId);
-        if (selectedRoute?.geometry?.coordinates?.length) {
-          const coords = selectedRoute.geometry.coordinates;
-          const lons = coords.map((c) => c[0]);
-          const lats = coords.map((c) => c[1]);
+        // Camera fitBounds to selected route ONLY if route selection changed
+        if (selectedRouteId && lastFittedRouteIdRef.current !== selectedRouteId) {
+          lastFittedRouteIdRef.current = selectedRouteId;
+          const selectedRoute = routes.find((r) => r.routeId === selectedRouteId);
+          if (selectedRoute?.geometry?.coordinates?.length) {
+            const coords = selectedRoute.geometry.coordinates;
+            const lons = coords.map((c) => c[0]);
+            const lats = coords.map((c) => c[1]);
 
-          const isMobile = window.innerWidth < 1024;
-          map.fitBounds(
-            [
-              [Math.min(...lons), Math.min(...lats)],
-              [Math.max(...lons), Math.max(...lats)],
-            ],
-            {
-              padding: isMobile
-                ? { top: 80, right: 40, bottom: 320, left: 40 }
-                : { top: 80, right: 80, bottom: 140, left: 448 },
-              maxZoom: 15.5,
-              duration: 1200,
-              essential: true,
-            }
-          );
+            const isMobile = window.innerWidth < 1024;
+            map.fitBounds(
+              [
+                [Math.min(...lons), Math.min(...lats)],
+                [Math.max(...lons), Math.max(...lats)],
+              ],
+              {
+                padding: isMobile
+                  ? { top: 80, right: 40, bottom: 320, left: 40 }
+                  : { top: 80, right: 80, bottom: 140, left: 448 },
+                maxZoom: 15.5,
+                duration: 1200,
+                essential: true,
+              }
+            );
+          }
         }
       } catch (err) {
         console.warn('Mapbox route render warning:', err);

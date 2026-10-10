@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import { SearchPanel } from '@/components/panel/SearchPanel';
 import { MetricLens } from '@/components/map/MetricLens';
@@ -31,6 +31,14 @@ export default function HomePage() {
   const [activeBbox, setActiveBbox] = useState<[number, number, number, number] | null>(null);
   const [reportCoords, setReportCoords] = useState<{ lat: number; lon: number } | null>(null);
   const [isReplayOpen, setIsReplayOpen] = useState(false);
+
+  const handleBboxChange = useCallback((bbox: [number, number, number, number]) => {
+    setActiveBbox(bbox);
+  }, []);
+
+  const handleRequestReport = useCallback((lat: number, lon: number) => {
+    setReportCoords({ lat, lon });
+  }, []);
 
   // Viewport polling hook (20s interval, clamped to <= 0.25 deg)
   useViewportIncidents(activeBbox);
@@ -174,8 +182,8 @@ export default function HomePage() {
         {/* Full-Bleed Mapbox Viewport */}
         <div className="w-full h-full relative z-0">
           <MapView
-            onBboxChange={setActiveBbox}
-            onRequestReport={(lat, lon) => setReportCoords({ lat, lon })}
+            onBboxChange={handleBboxChange}
+            onRequestReport={handleRequestReport}
           />
           <MetricLens />
           <TimeScrubber />
