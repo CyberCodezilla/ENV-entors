@@ -7,9 +7,12 @@ def make_samples(weather: pd.DataFrame, max_rows: int, threshold_mm: float) -> p
     df = build_weather_features(weather)
     df["target_rain_next_1h_mm"] = pd.to_numeric(df["rain_mm"], errors="coerce").shift(-1)
     df = df.dropna(subset=["target_rain_next_1h_mm"]).copy()
-    df["label"] = (df["target_rain_next_1h_mm"] >= threshold_mm).astype(int)
+    df["label"] = (df["target_rain_next_1h_mm"] >= threshold_mm).astype("int8")
     keep = ["timestamp", *NUMERIC_FEATURES, "target_rain_next_1h_mm", "label"]
     df = df[keep]
+    for col in NUMERIC_FEATURES + ["target_rain_next_1h_mm"]:
+        if col in df.columns:
+            df[col] = df[col].astype("float32")
     if len(df) > max_rows:
         idx = pd.Series(range(len(df))).sample(n=max_rows, random_state=42).sort_values().to_numpy()
         df = df.iloc[idx].sort_values("timestamp").reset_index(drop=True)

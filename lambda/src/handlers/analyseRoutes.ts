@@ -254,8 +254,12 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
 
         const segmentAssessments = await Promise.all(
           segs.map(async (seg, idx) => {
-            const [sLon, sLat] = seg.startCoord;
-            const [eLon, eLat] = seg.endCoord;
+            const [sLonRaw, sLatRaw] = seg.startCoord;
+            const [eLonRaw, eLatRaw] = seg.endCoord;
+            const sLat = Number(sLatRaw.toFixed(5));
+            const sLon = Number(sLonRaw.toFixed(5));
+            const eLat = Number(eLatRaw.toFixed(5));
+            const eLon = Number(eLonRaw.toFixed(5));
             const segMidLat = (sLat + eLat) / 2;
             const segMidLon = (sLon + eLon) / 2;
 
@@ -321,11 +325,19 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
           }),
         );
 
+        // Compact route line geometry coordinates to 5 decimal places for transport optimization
+        const compactGeometry = {
+          type: route.geometry.type,
+          coordinates: route.geometry.coordinates.map(
+            ([lon, lat]) => [Number(lon.toFixed(5)), Number(lat.toFixed(5))] as [number, number]
+          ),
+        };
+
         return {
           routeId: route.routeId,
           distanceM: route.distanceM,
           durationSec: route.durationSec,
-          geometry: route.geometry,
+          geometry: compactGeometry,
           segments: segmentAssessments,
         } satisfies RawRoute;
       }),
