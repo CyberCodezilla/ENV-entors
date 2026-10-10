@@ -15,6 +15,7 @@
  *     Date.parse is a single static operation that avoids constructing a
  *     Date object; the result is a number and the comparison is pure arithmetic.
  */
+import { encodeGeohash } from '@heatflood/shared';
 import { logger } from '../utils/logger';
 
 const BASE = 'https://api.open-meteo.com/v1/forecast';
@@ -32,7 +33,7 @@ export interface WeatherSnapshot {
 }
 
 const STALE_THRESHOLD_MINUTES = 30;
-const CACHE_TTL_MS = 15 * 60 * 1000; // 15-minute in-memory caching tier
+const CACHE_TTL_MS = 15 * 60 * 1000; // 15-minute edge caching tier
 
 interface CacheEntry {
   snapshot: WeatherSnapshot;
@@ -47,12 +48,13 @@ export async function fetchWeather(
   targetTimeUtc: Date,
 ): Promise<WeatherSnapshot> {
   const fetchedAt = new Date().toISOString();
-  const cacheKey = `${lat.toFixed(2)},${lon.toFixed(2)},${targetTimeUtc.toISOString().slice(0, 13)}`;
+  const gh4 = encodeGeohash(lat, lon, 4);
+  const cacheKey = `weather#${gh4}#${targetTimeUtc.toISOString().slice(0, 13)}`;
   const nowMs = Date.now();
 
   const cached = weatherCache.get(cacheKey);
   if (cached && nowMs - cached.cachedAtMs < CACHE_TTL_MS) {
-    logger.info('Weather cache hit', { cacheKey });
+    logger.info('Weather cache hit', { cacheKey, gh4 });
     return cached.snapshot;
   }
 

@@ -13,6 +13,7 @@
     "build": "npm run build --workspaces",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "vitest run tests/unit",
+    "test:all": "vitest run tests/unit",
     "test:watch": "vitest",
     "lint": "eslint . --ext .ts,.tsx",
     "deploy:backend": "cd infrastructure && sam build && sam deploy"

@@ -6,10 +6,10 @@ import { RouteCard } from './RouteCard';
 import { EmergencyAdvisory } from './EmergencyAdvisory';
 import { SegmentDrawer } from './SegmentDrawer';
 import { Skeleton } from '@/components/ui/Skeleton';
-import { AlertCircle, Loader2 } from 'lucide-react';
+import { AlertCircle, Loader2, Play } from 'lucide-react';
 
 export function ResultsStack() {
-  const { analysis, selectRoute, selectSegment } = useAppStore();
+  const { analysis, selectRoute, selectSegment, setSimulationOpen } = useAppStore();
   const { phase, data, error, selectedRouteId, selectedSegmentIndex } = analysis;
 
   // Initial load: show skeletons only if there is NO route data yet
@@ -44,7 +44,30 @@ export function ResultsStack() {
     );
   }
 
-  if (!data) return null;
+  if (!data) {
+    return (
+      <div className="glass-panel p-4 rounded-lg border border-line bg-base/50 flex flex-col gap-3 mt-1 animate-in fade-in">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-xs font-mono text-heat font-bold">
+            <Play className="w-3.5 h-3.5 fill-heat text-heat" />
+            <span>DISASTER SIMULATION SUITE</span>
+          </div>
+          <span className="text-[10px] font-mono text-ink-3">6 Mumbai Corridors</span>
+        </div>
+        <p className="text-xs text-ink-2 leading-relaxed">
+          Stress-test climate-resilient routing against reconstructed Mumbai monsoon cloudbursts, submerged subways, and extreme heatwaves.
+        </p>
+        <button
+          type="button"
+          onClick={() => setSimulationOpen(true)}
+          className="w-full py-2 px-3 rounded-md bg-raised hover:bg-raised/80 border border-heat/40 text-heat hover:text-white text-xs font-mono font-bold flex items-center justify-center gap-2 transition shadow-sm group"
+        >
+          <Play className="w-3.5 h-3.5 fill-heat text-heat group-hover:scale-110 transition-transform" />
+          <span>Run Simulation</span>
+        </button>
+      </div>
+    );
+  }
 
   const isRefreshing = phase === 'analysing';
   const selectedRoute = data.routes.find((r) => r.routeId === selectedRouteId);
