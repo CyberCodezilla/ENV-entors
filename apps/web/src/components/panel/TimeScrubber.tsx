@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useAppStore } from '@/lib/store/useAppStore';
@@ -8,6 +8,20 @@ export function TimeScrubber() {
   const { analysis, departureTime, setDepartureTime, analyse } = useAppStore();
   const [offsetMinutes, setOffsetMinutes] = useState(0); // 0 to 720 (12 hours)
   const baseTimeRef = useRef(new Date());
+
+  // Debounce re-analysis on slider change (600ms per M7 spec)
+  // MUST be called before any conditional return to satisfy React Rules of Hooks
+  useEffect(() => {
+    if (analysis.phase !== 'success' || !analysis.data || offsetMinutes === 0) return;
+
+    const currentDeparture = new Date(baseTimeRef.current.getTime() + offsetMinutes * 60_000);
+    const timer = setTimeout(() => {
+      setDepartureTime(currentDeparture.toISOString());
+      analyse();
+    }, 600);
+
+    return () => clearTimeout(timer);
+  }, [offsetMinutes, analysis.phase, analysis.data, analyse, setDepartureTime]);
 
   // Only render when route analysis is available
   if (analysis.phase !== 'success' || !analysis.data) return null;
@@ -31,18 +45,6 @@ export function TimeScrubber() {
       : istHour >= 9 && istHour <= 18
       ? 30
       : 10;
-
-  // Debounce re-analysis on slider change (600ms per M7 spec)
-  useEffect(() => {
-    if (offsetMinutes === 0) return;
-
-    const timer = setTimeout(() => {
-      setDepartureTime(currentDeparture.toISOString());
-      analyse();
-    }, 600);
-
-    return () => clearTimeout(timer);
-  }, [offsetMinutes]);
 
   return (
     <div
