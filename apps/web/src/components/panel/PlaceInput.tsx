@@ -99,18 +99,18 @@ export function PlaceInput({
 
   // Geolocation trigger
   function handleUseMyLocation() {
+    const isOrigin = label === 'Origin';
+    const fallbackPlace: Place = isOrigin
+      ? { name: 'Versova Beach, Andheri West', lat: 19.112, lon: 72.832 }
+      : { name: 'Andheri Metro Station, SV Road', lat: 19.138, lon: 72.855 };
+
     // Modern browsers block real GPS on HTTP (non-secure context)
     if (typeof window !== 'undefined' && !window.isSecureContext) {
-      const fallbackPlace: Place = {
-        name: 'Versova Beach (Mumbai Pilot Zone)',
-        lat: 19.112,
-        lon: 72.832,
-      };
       onChange(fallbackPlace);
       setQuery(fallbackPlace.name);
       toast({
         variant: 'info',
-        message: 'Browser GPS requires HTTPS. Set to Mumbai Pilot Zone location.',
+        message: `Browser GPS requires HTTPS. Set ${label} to Mumbai Pilot Zone coordinate.`,
       });
       return;
     }
@@ -140,16 +140,11 @@ export function PlaceInput({
         });
       },
       () => {
-        const fallbackPlace: Place = {
-          name: 'Versova Beach (Mumbai Pilot Zone)',
-          lat: 19.112,
-          lon: 72.832,
-        };
         onChange(fallbackPlace);
         setQuery(fallbackPlace.name);
         toast({
           variant: 'warn',
-          message: 'Location access denied or unavailable. Set to Mumbai Pilot Zone.',
+          message: `Location access denied or unavailable. Set ${label} to Mumbai Pilot Zone.`,
         });
       },
       { timeout: 10000, enableHighAccuracy: true }
