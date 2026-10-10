@@ -84,7 +84,7 @@ jobs:
             --resolve-s3 \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
-            --parameter-overrides Stage=prod AllowedOrigins="*"
+            --parameter-overrides Stage=prod AllowedOrigins="*" EnableCloudFront="false"
 
       - name: Configure production API URL for static frontend
         if: github.ref == 'refs/heads/main' && env.AWS_ACCESS_KEY_ID != '' && env.AWS_SECRET_ACCESS_KEY != ''
@@ -100,10 +100,10 @@ jobs:
       - name: Deploy Frontend to S3 & Invalidate CloudFront
         if: github.ref == 'refs/heads/main' && env.AWS_ACCESS_KEY_ID != '' && env.AWS_SECRET_ACCESS_KEY != ''
         run: |
-          DIST_ID=$(aws cloudfront list-distributions --query "DistributionList.Items[?Comment=='HeatFlood Frontend Distribution' || contains(Origins.Items[0].DomainName, 'heatflood-frontend')].Id | [0]" --output text)
-          BUCKET_NAME=$(aws cloudformation describe-stacks --stack-name heatflood-guardian --query "Stacks[0].Outputs[?OutputKey=='FrontendBucketName'].OutputValue" --output text)
+          DIST_ID=$(aws cloudfront list-distributions --query "DistributionList.Items[?Comment=='HeatFlood Frontend Distribution' || contains(Origins.Items[0].DomainName, 'heatflood-frontend')].Id | [0]" --output text 2>/dev/null || echo "None")
+          BUCKET_NAME=$(aws cloudformation describe-stacks --stack-name heatflood-guardian --region ap-south-1 --query "Stacks[0].Outputs[?OutputKey=='FrontendBucketName'].OutputValue | [0]" --output text)
           aws s3 sync apps/web/out s3://$BUCKET_NAME --delete
-          if [ "$DIST_ID" != "None" ] && [ -n "$DIST_ID" ]; then
+          if [ "$DIST_ID" != "None" ] && [ -n "$DIST_ID" ] && [ "$DIST_ID" != "null" ]; then
             aws cloudfront create-invalidation --distribution-id $DIST_ID --paths "/*"
           fi
 
