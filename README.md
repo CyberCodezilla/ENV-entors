@@ -114,58 +114,58 @@ How a community report is meant to travel through the system without being lost.
 
 <p align="center"><sub>AWS CLI in action</sub></p>
 
-| Service | Intended role |
-|---|---|
-| 
-
-![Lambda](https://img.shields.io/badge/AWS_Lambda-FF9900?style=flat-square&logo=awslambda&logoColor=white)
-
- | Execute backend operations |
-| 
-
-![API Gateway](https://img.shields.io/badge/API_Gateway-FF4F8B?style=flat-square&logo=amazonapigateway&logoColor=white)
-
- | Expose HTTP API endpoints |
-| 
-
-![DynamoDB](https://img.shields.io/badge/DynamoDB-4053D6?style=flat-square&logo=amazondynamodb&logoColor=white)
-
- | Store incident and hotspot data |
-| 
-
-![SQS](https://img.shields.io/badge/Amazon_SQS-FF4F8B?style=flat-square&logo=amazonsqs&logoColor=white)
-
- | Support asynchronous processing |
-| 
-
-![DLQ](https://img.shields.io/badge/SQS_Dead_Letter_Queue-B91C1C?style=flat-square&logo=amazonsqs&logoColor=white)
-
- | Isolate messages that cannot be processed |
-| 
-
-![Cognito](https://img.shields.io/badge/Cognito-DD344C?style=flat-square&logo=amazoncognito&logoColor=white)
-
- | Support user authentication |
-| 
-
-![S3](https://img.shields.io/badge/Amazon_S3-3F8624?style=flat-square&logo=amazons3&logoColor=white)
-
- | Host static frontend assets |
-| 
-
-![CloudFront](https://img.shields.io/badge/CloudFront-8C4FFF?style=flat-square&logo=amazonaws&logoColor=white)
-
- | Optional content delivery |
-| 
-
-![CloudWatch](https://img.shields.io/badge/CloudWatch-E7157B?style=flat-square&logo=amazoncloudwatch&logoColor=white)
-
- | Logs, metrics, and alarms |
-| 
-
-![SageMaker](https://img.shields.io/badge/SageMaker-01A88D?style=flat-square&logo=amazonaws&logoColor=white)
-
- | Optional machine-learning scoring |
+<div align="center">
+<table>
+  <thead>
+    <tr>
+      <th align="left">Service</th>
+      <th align="left">Intended role</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><img src="https://img.shields.io/badge/AWS_Lambda-FF9900?style=flat-square&logo=awslambda&logoColor=white" alt="AWS Lambda"></td>
+      <td>Execute backend operations</td>
+    </tr>
+    <tr>
+      <td><img src="https://img.shields.io/badge/API_Gateway-FF4F8B?style=flat-square&logo=amazonapigateway&logoColor=white" alt="API Gateway"></td>
+      <td>Expose HTTP API endpoints</td>
+    </tr>
+    <tr>
+      <td><img src="https://img.shields.io/badge/DynamoDB-4053D6?style=flat-square&logo=amazondynamodb&logoColor=white" alt="DynamoDB"></td>
+      <td>Store incident and hotspot data</td>
+    </tr>
+    <tr>
+      <td><img src="https://img.shields.io/badge/Amazon_SQS-FF4F8B?style=flat-square&logo=amazonsqs&logoColor=white" alt="Amazon SQS"></td>
+      <td>Support asynchronous processing</td>
+    </tr>
+    <tr>
+      <td><img src="https://img.shields.io/badge/SQS_Dead_Letter_Queue-B91C1C?style=flat-square&logo=amazonsqs&logoColor=white" alt="SQS Dead Letter Queue"></td>
+      <td>Isolate messages that cannot be processed</td>
+    </tr>
+    <tr>
+      <td><img src="https://img.shields.io/badge/Cognito-DD344C?style=flat-square&logo=amazoncognito&logoColor=white" alt="Cognito"></td>
+      <td>Support user authentication</td>
+    </tr>
+    <tr>
+      <td><img src="https://img.shields.io/badge/Amazon_S3-3F8624?style=flat-square&logo=amazons3&logoColor=white" alt="Amazon S3"></td>
+      <td>Host static frontend assets</td>
+    </tr>
+    <tr>
+      <td><img src="https://img.shields.io/badge/CloudFront-8C4FFF?style=flat-square&logo=amazonaws&logoColor=white" alt="CloudFront"></td>
+      <td>Optional content delivery</td>
+    </tr>
+    <tr>
+      <td><img src="https://img.shields.io/badge/CloudWatch-E7157B?style=flat-square&logo=amazoncloudwatch&logoColor=white" alt="CloudWatch"></td>
+      <td>Logs, metrics, and alarms</td>
+    </tr>
+    <tr>
+      <td><img src="https://img.shields.io/badge/SageMaker-01A88D?style=flat-square&logo=amazonaws&logoColor=white" alt="SageMaker"></td>
+      <td>Optional machine-learning scoring</td>
+    </tr>
+  </tbody>
+</table>
+</div>
 
 ## Tech Stack
 
