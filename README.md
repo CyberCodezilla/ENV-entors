@@ -185,10 +185,10 @@ How a community report is meant to travel through the system without being lost.
 
 <br>
 
-- Node.js compatible with the project's dependencies
-- npm
+- Node.js and npm
 - Git
-- Environment variables for any external services used
+- A Mapbox access token
+- AWS SAM CLI and AWS credentials, only for deploying the backend
 
 </details>
 
@@ -203,7 +203,7 @@ cd ENV-entors
 npm install
 ```
 
-Inspect the root package configuration and follow its workspace setup. The install command above assumes npm workspaces.
+Run `npm install` once at the root. It installs every workspace: `apps/web`, `lambda` and `packages/shared`.
 
 </details>
 
@@ -212,7 +212,7 @@ Inspect the root package configuration and follow its workspace setup. The insta
 
 <br>
 
-Create the environment file required by the web application and set the keys for mapping and any connected services.
+Use `.env.example` as the template and set `NEXT_PUBLIC_API_BASE_URL` (the backend API URL) and `NEXT_PUBLIC_MAPBOX_TOKEN` (your Mapbox access token).
 
 **Caution:** never commit API secrets, AWS credentials, access tokens, or other sensitive values.
 
@@ -227,33 +227,60 @@ Create the environment file required by the web application and set the keys for
 npm run dev
 ```
 
-This assumes the root package exposes a `dev` script. Check the repository's actual scripts before running commands.
+This starts the Next.js dashboard in development mode. Other root commands: `npm run build`, `npm test`, `npm run lint`, and `npm run deploy:backend` (SAM build and deploy).
 
 </details>
 
-<details>
-<summary><strong>Repository structure</strong></summary>
+
 
 <br>
 
-Exact paths may vary as the project evolves.
+Main folders and what each one holds.
+
+## 📂 Repository Structure
 
 ```text
 ENV-entors/
 ├── apps/
-│   └── web/
-│       └── src/
-│           └── app/
-│               ├── page.tsx
-│               └── globals.css
+│   └── web/                      Next.js dashboard
+│       ├── src/
+│       │   ├── app/              Home, command center, auth callback
+│       │   ├── components/       map, panel, incidents, moderation, replay, status, ui
+│       │   └── lib/              API client, auth, geo, hooks, store, theme
+│       ├── next.config.mjs
+│       ├── tailwind.config.ts
+│       └── package.json
+├── lambda/                       Serverless backend
+│   └── src/
+│       ├── handlers/             API handlers, incident worker, scenario workflow
+│       ├── engine/               Heat risk, flood risk, segment scoring, route ranking, confidence
+│       ├── adapters/             DynamoDB, Mapbox, Open-Meteo, SageMaker
+│       └── utils/                Hotspot cache, logger
+├── packages/
+│   └── shared/                   Shared types, schemas, constants, geo utilities
 ├── infrastructure/
-│   └── AWS deployment configuration
-├── services/
-│   └── Backend functions and application services
+│   └── template.yaml             AWS SAM template
+├── ml/                           Model training and SageMaker deployment
+│   ├── src/                      Data fetching, features, local training
+│   ├── sagemaker/                Train, deploy, invoke, pipeline
+│   ├── docs/
+│   └── tests/
+├── data/                         Hotspots and demo scenarios (heat, flood, compound)
+├── docs/                         API, deployment, ML and product documentation
+├── scripts/                      Hotspot seeding and ML helper scripts
+├── tests/
+│   ├── unit/                     Risk engine, ranking, schemas, incidents, scenarios
+│   └── e2e/                      Health check
+├── .github/
+│   └── workflows/ci.yml          CI pipeline
+├── workflows/
+│   └── ci.yml
+├── .env.example
+├── Makefile
+├── package.json
+├── tsconfig.base.json
 └── README.md
 ```
-
-</details>
 
 ## Responsible Use
 
