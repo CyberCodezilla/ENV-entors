@@ -13,6 +13,13 @@ import type {
 import type { AppError } from './errors';
 import { clampBbox, type Bbox } from '../geo/bbox';
 import { enqueueOfflineIncident } from '../offlineQueue';
+import {
+  generateOfflineAnalyseResponse,
+  generateOfflineDemoFixture,
+  getOfflineHealth,
+  getOfflineIncidents,
+  getOfflineStatus,
+} from './offlineFallback';
 
 const DEFAULT_BASE = 'https://jpiub1heok.execute-api.ap-south-1.amazonaws.com/prod';
 const BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || DEFAULT_BASE).replace(/\/+$/, '');
@@ -92,19 +99,34 @@ export async function apiFetch<T>(
 }
 
 export const api = {
-  analyseRoutes: (req: AnalyseRoutesRequest, signal?: AbortSignal) =>
-    apiFetch<AnalyseResponse>('/routes/analyse', {
-      method: 'POST',
-      body: JSON.stringify(req),
-      signal,
-    }),
+  analyseRoutes: async (req: AnalyseRoutesRequest, signal?: AbortSignal) => {
+    try {
+      return await apiFetch<AnalyseResponse>('/routes/analyse', {
+        method: 'POST',
+        body: JSON.stringify(req),
+        signal,
+      });
+    } catch (err) {
+      if ((err as AppError).kind === 'network' || (err as AppError).kind === 'server') {
+        return generateOfflineAnalyseResponse(req);
+      }
+      throw err;
+    }
+  },
 
-  listIncidents: (b: Bbox, signal?: AbortSignal) => {
+  listIncidents: async (b: Bbox, signal?: AbortSignal) => {
     const clamped = clampBbox(b); // HARD LAW: span <= 0.25 deg per axis (Section 2, Rule 4)
-    return apiFetch<IncidentsResponse>(
-      `/incidents?bbox=${clamped.lngMin},${clamped.latMin},${clamped.lngMax},${clamped.latMax}`,
-      { signal }
-    );
+    try {
+      return await apiFetch<IncidentsResponse>(
+        `/incidents?bbox=${clamped.lngMin},${clamped.latMin},${clamped.lngMax},${clamped.latMax}`,
+        { signal }
+      );
+    } catch (err) {
+      if ((err as AppError).kind === 'network' || (err as AppError).kind === 'server') {
+        return getOfflineIncidents(clamped);
+      }
+      throw err;
+    }
   },
 
   createIncident: (req: CreateIncidentRequest, signal?: AbortSignal) => {
@@ -120,6 +142,16 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(req),
       signal,
+    }).catch((err) => {
+      if ((err as AppError).kind === 'network' || (err as AppError).kind === 'server') {
+        enqueueOfflineIncident(req as any);
+        return {
+          incidentId: req.idempotencyKey,
+          status: 'queued_offline',
+          expiresAt: new Date(Date.now() + 3600000).toISOString(),
+        } as CreateIncidentResponse;
+      }
+      throw err;
     });
   },
 
@@ -127,13 +159,26 @@ export const api = {
     apiFetch<StatusResponse>(
       `/status?lat=${lat.toFixed(6)}&lon=${lon.toFixed(6)}`,
       { signal }
-    ),
+    ).catch(() => getOfflineStatus(lat, lon)),
 
-  getDemoScenario: (id: 'heat' | 'flood' | 'compound', signal?: AbortSignal) =>
-    apiFetch<DemoFixture>(`/demo/scenarios/${id}`, { signal }),
+  getDemoScenario: async (id: 'heat' | 'flood' | 'compound', signal?: AbortSignal) => {
+    try {
+      return await apiFetch<DemoFixture>(`/demo/scenarios/${id}`, { signal });
+    } catch (err) {
+      if ((err as AppError).kind === 'network' || (err as AppError).kind === 'server') {
+        return generateOfflineDemoFixture(id);
+      }
+      throw err;
+    }
+  },
 
-  getHealth: (signal?: AbortSignal) =>
-    apiFetch<HealthResponse>('/health', { signal }),
+  getHealth: async (signal?: AbortSignal) => {
+    try {
+      return await apiFetch<HealthResponse>('/health', { signal });
+    } catch {
+      return getOfflineHealth();
+    }
+  },
 
   verifyIncident: (id: string, idToken: string, signal?: AbortSignal) =>
     apiFetch<VerifyResponse>(`/incidents/${id}/verify`, {
