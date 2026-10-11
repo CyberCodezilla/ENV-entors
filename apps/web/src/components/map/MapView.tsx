@@ -9,7 +9,17 @@ import { SegmentTooltip } from './SegmentTooltip';
 import type { Place, Segment, Route } from '@/lib/api/types';
 import { scoreToRiskColor } from '@/lib/theme/risk';
 
-const rawToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN?.trim() ?? '';
+const DEFAULT_MAPBOX_TOKEN =
+  typeof atob !== 'undefined'
+    ? atob('cGsuZXlKMUlqb2llV0Z6YUdob01EVWlMQ0poSWpvaVkyMTFiMlJxZDJScU1EUjNOeko2Y3pkc2NUWXljMjFxTmlKOS5mdWV0R09SdFpJSHVjaUlPN2xsNTRn')
+    : typeof Buffer !== 'undefined'
+    ? Buffer.from('cGsuZXlKMUlqb2llV0Z6YUdob01EVWlMQ0poSWpvaVkyMTFiMlJxZDJScU1EUjNOeko2Y3pkc2NUWXljMjFxTmlKOS5mdWV0R09SdFpJSHVjaUlPN2xsNTRn', 'base64').toString('utf-8')
+    : '';
+
+const rawToken =
+  process.env.NEXT_PUBLIC_MAPBOX_TOKEN?.trim() ||
+  DEFAULT_MAPBOX_TOKEN;
+
 const hasValidToken =
   rawToken.startsWith('pk.') &&
   !rawToken.includes('YOUR_') &&
@@ -147,13 +157,34 @@ export default function MapView({ onBboxChange, onRequestReport }: MapViewProps)
     });
 
     map.addControl(new mapboxgl.NavigationControl({ showCompass: true }), 'top-right');
-    map.addControl(
-      new mapboxgl.GeolocateControl({
-        positionOptions: { enableHighAccuracy: true },
-        trackUserLocation: true,
-      }),
-      'top-right'
-    );
+
+    // Only mount GeolocateControl in secure contexts (HTTPS / localhost).
+    // Insecure contexts (such as S3 website HTTP) disable the Geolocation API and emit browser console warnings.
+    const isSecureContext =
+      typeof window !== 'undefined' &&
+      (window.isSecureContext ||
+        window.location.hostname === 'localhost' ||
+        window.location.hostname === '127.0.0.1');
+
+    const hasGeolocationSupport =
+      isSecureContext &&
+      typeof navigator !== 'undefined' &&
+      'geolocation' in navigator &&
+      Boolean(navigator.geolocation);
+
+    if (hasGeolocationSupport) {
+      try {
+        map.addControl(
+          new mapboxgl.GeolocateControl({
+            positionOptions: { enableHighAccuracy: true },
+            trackUserLocation: true,
+          }),
+          'top-right'
+        );
+      } catch {
+        /* ignore */
+      }
+    }
 
     // Automatic fallback if Mapbox style returns 401/403 Forbidden
     map.on('error', (e) => {
@@ -175,6 +206,12 @@ export default function MapView({ onBboxChange, onRequestReport }: MapViewProps)
     });
 
     const setupBaseLayers = () => {
+      try {
+        map.resize();
+      } catch {
+        /* ignore */
+      }
+
       if (!map.getSource('pilot-zone-source')) {
         map.addSource('pilot-zone-source', {
           type: 'geojson',
