@@ -32,10 +32,6 @@ if (hasValidToken) {
 
 const INITIAL_CENTER: [number, number] = [72.845, 19.1225];
 const INITIAL_ZOOM = 13.5;
-const MAX_BOUNDS: [[number, number], [number, number]] = [
-  [72.7, 19.0],
-  [73.0, 19.3],
-];
 
 export interface MapViewProps {
   onBboxChange?: (bbox: [number, number, number, number]) => void;
@@ -152,7 +148,7 @@ export default function MapView({ onBboxChange, onRequestReport }: MapViewProps)
       style: initialStyle,
       center: INITIAL_CENTER,
       zoom: INITIAL_ZOOM,
-      maxBounds: MAX_BOUNDS,
+      renderWorldCopies: true,
       attributionControl: false,
     });
 
@@ -303,7 +299,31 @@ export default function MapView({ onBboxChange, onRequestReport }: MapViewProps)
 
     mapRef.current = map;
 
+    // Responsive container resize observer to guarantee chunk-wise loading on screen size / layout changes
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined' && containerRef.current) {
+      resizeObserver = new ResizeObserver(() => {
+        try {
+          map.resize();
+        } catch {
+          /* ignore */
+        }
+      });
+      resizeObserver.observe(containerRef.current);
+    }
+
+    const handleWindowResize = () => {
+      try {
+        map.resize();
+      } catch {
+        /* ignore */
+      }
+    };
+    window.addEventListener('resize', handleWindowResize);
+
     return () => {
+      window.removeEventListener('resize', handleWindowResize);
+      resizeObserver?.disconnect();
       clearTimeout(moveTimeout);
       map.remove();
       mapRef.current = null;

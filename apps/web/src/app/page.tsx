@@ -187,7 +187,7 @@ export default function HomePage() {
         </div>
 
         {/* Full-Bleed Mapbox Viewport */}
-        <div className="w-full h-full relative z-0">
+        <div className="w-full h-full flex-1 relative z-0">
           <MapView
             onBboxChange={handleBboxChange}
             onRequestReport={handleRequestReport}
