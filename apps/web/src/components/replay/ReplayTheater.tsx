@@ -30,7 +30,9 @@ export const MUMBAI_SIMULATION_LANDMARKS: Array<{
   lon: number;
   area: string;
 }> = [
-  { name: 'Versova Metro Terminal', lat: 19.135, lon: 72.818, area: 'Versova' },
+  { name: 'Versova Beach, Andheri West', lat: 19.112, lon: 72.832, area: 'Versova' },
+  { name: 'Andheri Metro Station, SV Road', lat: 19.138, lon: 72.855, area: 'Andheri West' },
+  { name: 'Versova Metro Terminal', lat: 19.135, lon: 72.822, area: 'Versova' },
   { name: 'Andheri Railway Station (SV Road)', lat: 19.1197, lon: 72.8465, area: 'Andheri West' },
   { name: 'DN Nagar Metro Interchange', lat: 19.1245, lon: 72.8354, area: 'DN Nagar' },
   { name: 'Lokhandwala Complex Market', lat: 19.138, lon: 72.828, area: 'Lokhandwala' },
@@ -39,7 +41,6 @@ export const MUMBAI_SIMULATION_LANDMARKS: Array<{
   { name: 'Four Bungalows Market', lat: 19.126, lon: 72.828, area: 'Four Bungalows' },
   { name: 'Azad Nagar Metro (Bhavans College)', lat: 19.125, lon: 72.8385, area: 'Azad Nagar' },
   { name: 'Oshiwara River Bridge Crossing', lat: 19.143, lon: 72.833, area: 'Oshiwara' },
-  { name: 'Versova Fishing Village & Koliwada', lat: 19.1315, lon: 72.815, area: 'Versova Beach' },
   { name: 'Juhu Circle (Kaifi Azmi Park)', lat: 19.114, lon: 72.83, area: 'Juhu' },
 ];
 
@@ -71,12 +72,12 @@ export function ReplayTheater({ isOpen: propsIsOpen, onClose: propsOnClose }: Re
       title: 'Monsoon Flash Flood — Andheri Subway Inundation',
       badge: '32.5 mm/h Downpour',
       corridor: {
-        originName: 'Versova Metro Terminal',
-        destinationName: 'Andheri Station (SV Road)',
+        originName: 'Versova Beach & SV Road',
+        destinationName: 'Andheri Metro Interchange',
       },
       locations: {
-        origin: { name: 'Versova Metro Terminal', lat: 19.135, lon: 72.818 },
-        destination: { name: 'Andheri Station (SV Road)', lat: 19.1197, lon: 72.8465 },
+        origin: { name: 'Versova Beach, Andheri West', lat: 19.112, lon: 72.832 },
+        destination: { name: 'Andheri Metro Station, SV Road', lat: 19.138, lon: 72.855 },
       },
       description:
         'Torrential monsoon cloudburst with 3 verified waterlogging closures near Andheri subway. Demonstrates hard-blocking of submerged underpasses and diversion onto elevated arterial flyovers.',

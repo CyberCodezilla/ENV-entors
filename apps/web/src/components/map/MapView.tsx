@@ -108,16 +108,29 @@ export default function MapView({ onBboxChange, onRequestReport }: MapViewProps)
   // Create custom Gate marker for hard-blocked segment midpoint
   const createGateMarkerEl = useCallback((reason: string | null) => {
     const el = document.createElement('div');
-    el.className = 'flex items-center justify-center cursor-pointer';
-    el.style.width = '28px';
-    el.style.height = '28px';
+    el.className = 'relative flex items-center justify-center cursor-pointer group select-none';
+    el.style.width = '36px';
+    el.style.height = '36px';
 
+    // Outer pulsating halo ping for immediate visual impact
+    const ping = document.createElement('div');
+    ping.className = 'absolute inset-0 rounded-full bg-risk-4/60 animate-ping pointer-events-none';
+    el.appendChild(ping);
+
+    // Main red circle with bold white ✕
     const ring = document.createElement('div');
     ring.className =
-      'w-6 h-6 rounded-full bg-risk-4 border-2 border-white shadow-glass flex items-center justify-center text-white font-mono font-bold text-xs animate-pulse';
+      'w-8 h-8 rounded-full bg-risk-4 border-2 border-white shadow-glowHeat flex items-center justify-center text-white font-mono font-black text-sm relative z-10 transition-transform hover:scale-110';
     ring.innerText = '✕';
-    ring.title = `Impassable: ${reason || 'Hazard closure'}`;
+    ring.title = `Impassable: ${reason || 'Flooded underpass closure'}`;
     el.appendChild(ring);
+
+    // Floating IMPASSABLE badge above marker
+    const badge = document.createElement('div');
+    badge.className =
+      'absolute -top-6 px-1.5 py-0.5 rounded bg-void/95 border border-risk-4 text-[9px] font-mono font-bold text-risk-4 whitespace-nowrap shadow-md pointer-events-none uppercase tracking-wider z-20';
+    badge.innerText = 'Impassable ✕';
+    el.appendChild(badge);
 
     return el;
   }, []);
@@ -501,7 +514,6 @@ export default function MapView({ onBboxChange, onRequestReport }: MapViewProps)
           } else {
             map.addSource(srcId, {
               type: 'geojson',
-              lineMetrics: true,
               data: geojsonContent,
             });
             routeSourcesRef.current.push(srcId);
@@ -599,11 +611,13 @@ export default function MapView({ onBboxChange, onRequestReport }: MapViewProps)
 
           // Add Gate marker at blocked segment midpoint if route is hard-blocked
           if (route.isHardBlocked) {
-            const blockedSeg = route.segments.find((s) => s.hardBlock);
+            const blockedSeg =
+              route.segments.find((s) => s.hardBlock) ||
+              route.segments[Math.floor(route.segments.length / 2)];
             if (blockedSeg) {
               const midLat = (blockedSeg.startCoord.lat + blockedSeg.endCoord.lat) / 2;
               const midLon = (blockedSeg.startCoord.lon + blockedSeg.endCoord.lon) / 2;
-              const gateEl = createGateMarkerEl(blockedSeg.hardBlockReason);
+              const gateEl = createGateMarkerEl(blockedSeg.hardBlockReason || route.blockReason);
               const gateMarker = new mapboxgl.Marker({ element: gateEl })
                 .setLngLat([midLon, midLat])
                 .addTo(map);
@@ -617,6 +631,17 @@ export default function MapView({ onBboxChange, onRequestReport }: MapViewProps)
             }
           }
         });
+
+        // Safety guarantee: During flood replay, ensure the flooded Andheri Subway gate marker is mounted
+        const currentReplay = useAppStore.getState().replay;
+        if (currentReplay.active && currentReplay.scenarioId === 'flood' && gateMarkersRef.current.length === 0) {
+          const subwayLngLat: [number, number] = [72.845, 19.118];
+          const gateEl = createGateMarkerEl('Andheri Subway low underpass submerged (1.2m water depth)');
+          const gateMarker = new mapboxgl.Marker({ element: gateEl })
+            .setLngLat(subwayLngLat)
+            .addTo(map);
+          gateMarkersRef.current.push(gateMarker);
+        }
 
         // Camera fitBounds to selected route ONLY if route selection changed
         if (selectedRouteId && lastFittedRouteIdRef.current !== selectedRouteId) {
