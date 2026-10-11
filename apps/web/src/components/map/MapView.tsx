@@ -8,25 +8,10 @@ import { PILOT_ZONE_GEOJSON, PILOT_ZONE_LAYERS, CARTO_DARK_STYLE } from './layer
 import { SegmentTooltip } from './SegmentTooltip';
 import type { Place, Segment, Route } from '@/lib/api/types';
 import { scoreToRiskColor } from '@/lib/theme/risk';
+import { getMapboxToken, hasValidToken } from '@/lib/mapboxToken';
 
-const DEFAULT_MAPBOX_TOKEN =
-  typeof atob !== 'undefined'
-    ? atob('cGsuZXlKMUlqb2llV0Z6YUdob01EVWlMQ0poSWpvaVkyMTFiMlJxZDJScU1EUjNOeko2Y3pkc2NUWXljMjFxTmlKOS5mdWV0R09SdFpJSHVjaUlPN2xsNTRn')
-    : typeof Buffer !== 'undefined'
-    ? Buffer.from('cGsuZXlKMUlqb2llV0Z6YUdob01EVWlMQ0poSWpvaVkyMTFiMlJxZDJScU1EUjNOeko2Y3pkc2NUWXljMjFxTmlKOS5mdWV0R09SdFpJSHVjaUlPN2xsNTRn', 'base64').toString('utf-8')
-    : '';
-
-const rawToken =
-  process.env.NEXT_PUBLIC_MAPBOX_TOKEN?.trim() ||
-  DEFAULT_MAPBOX_TOKEN;
-
-const hasValidToken =
-  rawToken.startsWith('pk.') &&
-  !rawToken.includes('YOUR_') &&
-  !rawToken.includes('<') &&
-  rawToken.length > 30;
-
-if (hasValidToken) {
+const rawToken = getMapboxToken();
+if (rawToken) {
   mapboxgl.accessToken = rawToken;
 }
 

@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { MapPin, Crosshair, Navigation, AlertTriangle, Loader2 } from 'lucide-react';
 import type { Place } from '@/lib/api/types';
 import { useToast } from '@/components/ui/Toast';
+import { getMapboxToken } from '@/lib/mapboxToken';
 
 export interface PlaceInputProps {
   label: 'Origin' | 'Destination';
@@ -30,6 +31,7 @@ export function PlaceInput({
   const [query, setQuery] = useState(value?.name ?? '');
   const [suggestions, setSuggestions] = useState<Place[]>([]);
   const [loading, setLoading] = useState(false);
+  const [locating, setLocating] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
   const { toast } = useToast();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -59,8 +61,8 @@ export function PlaceInput({
     }
 
     const timer = setTimeout(async () => {
-      const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
-      if (!token || token.startsWith('pk.YOUR_')) {
+      const token = getMapboxToken();
+      if (!token) {
         // Fallback local suggestions if token is placeholder
         setSuggestions([
           { name: `${query} (Versova Beach)`, lat: 19.112, lon: 72.832 },
@@ -97,58 +99,140 @@ export function PlaceInput({
     return () => clearTimeout(timer);
   }, [query, value]);
 
+  // Reverse geocode lat/lon to a readable place name using Mapbox
+  async function reverseGeocode(lat: number, lon: number): Promise<string | null> {
+    const token = getMapboxToken();
+    if (!token) return null;
+    try {
+      const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${lon},${lat}.json?limit=1&access_token=${token}`;
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.features && data.features.length > 0) {
+          return data.features[0].place_name;
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    return null;
+  }
+
   // Geolocation trigger
-  function handleUseMyLocation() {
+  async function handleUseMyLocation() {
+    if (locating) return;
+    setLocating(true);
+
     const isOrigin = label === 'Origin';
     const fallbackPlace: Place = isOrigin
       ? { name: 'Versova Beach, Andheri West', lat: 19.112, lon: 72.832 }
       : { name: 'Andheri Metro Station, SV Road', lat: 19.138, lon: 72.855 };
 
-    // Modern browsers block real GPS on HTTP (non-secure context)
-    if (typeof window !== 'undefined' && !window.isSecureContext) {
+    let detected: { lat: number; lon: number; name?: string } | null = null;
+
+    // 1. Attempt Browser Geolocation API
+    if (typeof navigator !== 'undefined' && 'geolocation' in navigator) {
+      try {
+        const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            timeout: 3500,
+            enableHighAccuracy: true,
+            maximumAge: 60000,
+          });
+        });
+        detected = {
+          lat: Number(pos.coords.latitude.toFixed(4)),
+          lon: Number(pos.coords.longitude.toFixed(4)),
+        };
+      } catch {
+        // GPS unavailable, denied, or restricted by browser on non-secure origins
+      }
+    }
+
+    // 2. IP-based Geolocation Fallback (Works reliably over HTTP without permission prompts)
+    if (!detected && typeof window !== 'undefined') {
+      try {
+        const controller = new AbortController();
+        const tid = setTimeout(() => controller.abort(), 3000);
+        const res = await fetch('https://ipwho.is/', { signal: controller.signal });
+        clearTimeout(tid);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && typeof data.latitude === 'number' && typeof data.longitude === 'number') {
+            detected = {
+              lat: Number(data.latitude.toFixed(4)),
+              lon: Number(data.longitude.toFixed(4)),
+              name: data.city ? `${data.city}, Maharashtra` : undefined,
+            };
+          }
+        }
+      } catch {
+        // ipwho.is failed, try ip-api.com
+      }
+
+      if (!detected) {
+        try {
+          const controller = new AbortController();
+          const tid = setTimeout(() => controller.abort(), 3000);
+          const res = await fetch('http://ip-api.com/json/', { signal: controller.signal });
+          clearTimeout(tid);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.status === 'success' && typeof data.lat === 'number' && typeof data.lon === 'number') {
+              detected = {
+                lat: Number(data.lat.toFixed(4)),
+                lon: Number(data.lon.toFixed(4)),
+                name: data.city ? `${data.city}, Maharashtra` : undefined,
+              };
+            }
+          }
+        } catch {
+          // secondary IP lookup failed
+        }
+      }
+    }
+
+    try {
+      if (detected) {
+        // Check if detected coordinates are in the greater Mumbai region (lat 18.5 - 19.5, lon 72.5 - 73.5)
+        const isMumbaiRegion =
+          detected.lat >= 18.5 &&
+          detected.lat <= 19.5 &&
+          detected.lon >= 72.5 &&
+          detected.lon <= 73.5;
+
+        if (isMumbaiRegion) {
+          const geocodedName = await reverseGeocode(detected.lat, detected.lon);
+          const finalName =
+            geocodedName ||
+            detected.name ||
+            `Current Location (${detected.lat}, ${detected.lon})`;
+
+          const place: Place = {
+            name: finalName,
+            lat: detected.lat,
+            lon: detected.lon,
+          };
+          onChange(place);
+          setQuery(place.name);
+          toast({
+            variant: 'success',
+            message: `Set ${label} to current location (${finalName.split(',')[0]}).`,
+          });
+          return;
+        }
+      }
+
+      // If outside Mumbai or detection completely unavailable, set Mumbai Pilot Zone landmark
       onChange(fallbackPlace);
       setQuery(fallbackPlace.name);
       toast({
-        variant: 'info',
-        message: `Browser GPS requires HTTPS. Set ${label} to Mumbai Pilot Zone coordinate.`,
+        variant: 'success',
+        message: `Set ${label} to Mumbai Pilot Zone coordinate (${fallbackPlace.name.split(',')[0]}).`,
       });
-      return;
+    } finally {
+      setLocating(false);
     }
-
-    if (!navigator.geolocation) {
-      toast({
-        variant: 'error',
-        message: 'Geolocation is not supported by your browser.',
-      });
-      return;
-    }
-
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const lat = Number(pos.coords.latitude.toFixed(4));
-        const lon = Number(pos.coords.longitude.toFixed(4));
-        const place: Place = {
-          name: `Current Location (${lat}, ${lon})`,
-          lat,
-          lon,
-        };
-        onChange(place);
-        setQuery(place.name);
-        toast({
-          variant: 'success',
-          message: `Set ${label} to current GPS coordinates.`,
-        });
-      },
-      () => {
-        onChange(fallbackPlace);
-        setQuery(fallbackPlace.name);
-        toast({
-          variant: 'warn',
-          message: `Location access denied or unavailable. Set ${label} to Mumbai Pilot Zone.`,
-        });
-      },
-      { timeout: 10000, enableHighAccuracy: true }
-    );
   }
 
   // Pilot zone check
@@ -199,11 +283,16 @@ export function PlaceInput({
           <button
             type="button"
             onClick={handleUseMyLocation}
+            disabled={locating}
             title="Use my location"
             aria-label={`Use my location for ${label}`}
-            className="p-1 rounded text-ink-3 hover:text-flood hover:bg-raised/70 transition"
+            className="p-1 rounded text-ink-3 hover:text-flood hover:bg-raised/70 transition disabled:opacity-50"
           >
-            <Navigation className="w-3.5 h-3.5" />
+            {locating ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-flood" />
+            ) : (
+              <Navigation className="w-3.5 h-3.5" />
+            )}
           </button>
 
           <button
